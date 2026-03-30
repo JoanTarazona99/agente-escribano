@@ -1,0 +1,168 @@
+"""
+Configuración base de Django — compartida entre entornos.
+Compatible con Python 3.13 / Django 5.x
+"""
+from pathlib import Path
+
+import environ
+
+# BASE_DIR apunta a backend/
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Inicializar django-environ
+env = environ.Env(
+    DEBUG=(bool, False),
+    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
+)
+
+# Leer .env en la raíz del proyecto (un nivel arriba de backend/)
+environ.Env.read_env(BASE_DIR.parent / ".env.dev")
+
+
+# ─── Seguridad ────────────────────────────────────────────
+SECRET_KEY = env("DJANGO_SECRET_KEY")
+DEBUG = env("DJANGO_DEBUG", default=False)
+ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+
+
+# ─── Aplicaciones ─────────────────────────────────────────
+DJANGO_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+]
+
+THIRD_PARTY_APPS = [
+    "rest_framework",
+    "corsheaders",
+    "drf_spectacular",
+]
+
+LOCAL_APPS = [
+    "apps.articles",
+    "apps.search",
+    "apps.agent",
+]
+
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+
+
+# ─── Middleware ───────────────────────────────────────────
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "config.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+
+# ─── Base de datos ────────────────────────────────────────
+DATABASES = {
+    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
+}
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ─── Contraseñas ──────────────────────────────────────────
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+
+# ─── Internacionalización ─────────────────────────────────
+LANGUAGE_CODE = "es-es"
+TIME_ZONE = "UTC"
+USE_I18N = True
+USE_TZ = True
+
+
+# ─── Archivos estáticos ───────────────────────────────────
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+
+# ─── Django REST Framework ────────────────────────────────
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "300/min",
+        "search": "10/min",
+    },
+}
+
+
+# ─── drf-spectacular (OpenAPI) ────────────────────────────
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Agente Escribano API",
+    "DESCRIPTION": (
+        "API para búsqueda y análisis de artículos científicos sobre "
+        "disociación/recombinación de moléculas de agua en sistemas electromembrana (ЭМС)."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
+
+
+# ─── CORS ────────────────────────────────────────────────
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS",
+    default=["http://localhost:5173", "http://127.0.0.1:5173"],
+)
+
+
+# ─── Ollama / LLM ────────────────────────────────────────
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
+OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
+
+
+# ─── APIs académicas ─────────────────────────────────────
+SCOPUS_API_KEY = env("SCOPUS_API_KEY", default="")
+WOS_API_KEY = env("WOS_API_KEY", default="")
+
+# ─── eLIBRARY ────────────────────────────────────────────
+# URL de proxy residencial ruso (opcional). Formato: http://user:pass@host:port
+ELIBRARY_PROXY_URL = env("ELIBRARY_PROXY_URL", default="")
+# Horas de cooldown entre búsquedas reales en eLIBRARY (minimizar requests).
+# Si la última búsqueda exitosa fue hace menos de este tiempo, se omite la
+# petición HTTP y se devuelven los artículos ya guardados en BD.
+ELIBRARY_COOLDOWN_HOURS = env.int("ELIBRARY_COOLDOWN_HOURS", default=24)

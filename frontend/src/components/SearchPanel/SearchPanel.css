@@ -1,0 +1,135 @@
+.search-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow);
+}
+
+.search-panel__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.search-panel__subtitle {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  margin-top: -8px;
+}
+
+.search-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.search-panel__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-panel__label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.search-panel__textarea,
+.search-panel__number {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-size: 0.85rem;
+  font-family: var(--font);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  transition: border-color 0.15s;
+  resize: vertical;
+}
+
+.search-panel__textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.search-panel__textarea:focus,
+.search-panel__number:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.search-panel__number { width: 90px; resize: none; }
+
+.search-panel__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search-panel__source-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.search-panel__source-item input[type="checkbox"] {
+  accent-color: var(--color-primary);
+}
+
+.search-panel__source-item--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.search-panel__source-item--disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
+.search-panel__soon {
+  font-size: 0.6rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.search-panel__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.search-panel__submit {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  line-height: 1;
+}
+
+.search-panel__submit:hover:not(:disabled) {
+  background: var(--color-primary-dark);
+  transform: scale(1.08);
+}
+
+.search-panel__submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .search-panel { padding: 14px; }
+}

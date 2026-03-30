@@ -1,0 +1,20 @@
+# ─── Django core ─────────────────────────────────────────
+Django>=5.1,<6.0
+djangorestframework>=3.16,<4.0
+django-cors-headers>=4.4,<5.0
+django-environ>=0.12,<1.0
+django-filter>=24.3,<25.0
+drf-spectacular>=0.28,<1.0
+
+# ─── LLM ─────────────────────────────────────────────────
+ollama>=0.4,<1.0
+
+# ─── HTTP / scraping ─────────────────────────────────────
+httpx>=0.28,<1.0
+curl-cffi
+browser-cookie3>=0.14,<1.0        # impersona Chrome/Firefox para bypass JA3 (eLIBRARY)
+beautifulsoup4>=4.12,<5.0
+
+# ─── Producción ──────────────────────────────────────────
+gunicorn>=23.0,<24.0
+whitenoise>=6.8,<7.0

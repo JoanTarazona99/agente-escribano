@@ -1,0 +1,127 @@
+{
+  "nav": {
+    "dashboard": "Inicio",
+    "search": "Búsqueda",
+    "settings": "Ajustes"
+  },
+  "dashboard": {
+    "title": "Agente Escribano — ЭМС",
+    "description": "Búsqueda y análisis de artículos científicos sobre disociación/recombinación de moléculas de agua en sistemas electromembrana.",
+    "stat_total": "Artículos en base",
+    "stat_ai_processed": "Analizados por IA",
+    "start_search": "Iniciar nueva búsqueda",
+    "recent": "Artículos recientes",
+    "see_all": "Ver todos los {{count}} artículos"
+  },
+  "search": {
+    "title": "Buscar artículos científicos",
+    "subtitle": "Busca en arXiv, eLIBRARY, Scopus y Web of Science",
+    "form_label": "Formulario de búsqueda",
+    "query_label": "Consulta de búsqueda",
+    "sources_label": "Fuentes de datos",
+    "max_per_source_label": "Máx. por fuente",
+    "submit": "Buscar",
+    "searching": "Buscando…",
+    "filter_text": "Filtrar por texto…",
+    "filter_all_sources": "Todas las fuentes",
+    "filter_all_types": "Todos los tipos",
+    "source_unavailable": "Esta fuente requiere una API key de pago que aún no está configurada.",
+    "coming_soon": "Próximamente",
+    "results_count": "{{count}} artículos",
+    "no_results": "No se encontraron artículos. Intenta con otra consulta.",
+    "load_more": "Cargar más ({{shown}} de {{total}})",
+    "sources_title": "Fuentes",
+    "select_article": "Selecciona un artículo",
+    "select_article_desc": "Elige una fuente del panel izquierdo para ver el resumen y análisis."
+  },
+  "article": {
+    "abstract": "Abstract",
+    "keywords": "Palabras clave",
+    "open_source": "Ver fuente",
+    "download_pdf": "Descargar PDF",
+    "ai_processed": "Procesado por IA",
+    "ai_analysis_title": "Análisis de Inteligencia Artificial",
+    "ai_summary": "Resumen",
+    "ai_full_analysis": "Análisis detallado",
+    "ai_not_processed": "Este artículo aún no ha sido analizado por el modelo de IA.",
+    "analyze": "Analizar con IA",
+    "reanalyze": "Reanalizar",
+    "analyzing": "Analizando…",
+    "analyzing_bg": "Análisis en curso… La página se actualizará automáticamente.",
+    "analyze_error": "Error al analizar: {{message}}",
+    "more_options": "Más opciones",
+    "rename": "Cambiar nombre",
+    "delete": "Eliminar fuente",
+    "confirm_delete": "¿Seguro que deseas eliminar este artículo? Esta acción no se puede deshacer."
+  },
+  "article_type": {
+    "theoretical": "Teórico",
+    "experimental": "Experimental",
+    "review": "Revisión",
+    "mixed": "Teórico-Experimental",
+    "unknown": "No determinado"
+  },
+  "job": {
+    "status": {
+      "pending": "En cola…",
+      "running": "Búsqueda en curso…",
+      "completed": "Búsqueda completada",
+      "failed": "La búsqueda falló"
+    },
+    "completed_detail": "{{found}} encontrados · {{saved}} guardados/actualizados"
+  },
+  "settings": {
+    "title": "Ajustes",
+    "language": "Idioma de la interfaz",
+    "language_description": "Selecciona el idioma en que se mostrará la interfaz y los contenidos traducidos.",
+    "api_keys": "Claves de API",
+    "api_keys_description": "Estado de las credenciales para las bases de datos académicas.",
+    "key_pending": "Pendiente de configurar en .env",
+    "key_not_required": "No requiere clave",
+    "system_status": "Estado del sistema",
+    "health_error": "No se pudo conectar con el backend.",
+    "database": "Base de datos",
+    "models_available": "modelos disponibles",
+    "stats": "Estadísticas",
+    "articles": "artículos",
+    "ai_analyzed": "analizados por IA"
+  },
+  "create_notebook": "Crear cuaderno",
+  "notebook_title_placeholder": "Mi nuevo cuaderno…",
+  "notebook_empty": "Este cuaderno está vacío. Inicia una búsqueda para agregar artículos.",
+  "article": "artículo",
+  "articles": "artículos",
+  "confirm_delete": "¿Seguro que quieres eliminar este cuaderno? Esta acción no se puede deshacer.",
+  "creating": "Creando…",
+  "cancel": "Cancelar",
+  "create": "Crear",
+  "delete": "Eliminar",
+  "start_search": "Iniciar búsqueda",
+  "home": {
+    "title": "Mis cuadernos",
+    "subtitle": "Organiza y analiza artículos científicos sobre ЭМС",
+    "new_notebook": "Nuevo cuaderno",
+    "empty": "Aún no tienes cuadernos. Crea uno para empezar a organizar tus artículos."
+  },
+  "notebook": {
+    "sources": "Fuentes",
+    "add_source": "Añadir fuentes",
+    "search_databases": "Buscar en bases de datos",
+    "remove_source": "Quitar fuente",
+    "search_articles": "Buscar artículos para agregar…",
+    "type_to_search": "Escribe para buscar artículos en la base de datos",
+    "no_articles_found": "No se encontraron artículos",
+    "empty_hint": "Agrega artículos desde la búsqueda para empezar",
+    "select_source": "Selecciona una fuente",
+    "select_source_desc": "Elige un artículo del panel izquierdo para ver su detalle y análisis.",
+    "click_to_rename": "Doble clic para renombrar",
+    "search_placeholder": "Buscar en arXiv, eLIBRARY, Scopus…",
+    "drop_or_click": "Suelta archivos aquí o haz clic para seleccionar",
+    "drop_formats": "PDF, imágenes, documentos y audio, entre otros"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "not_found": "No encontrado",
+    "back": "Volver"
+  }
+}

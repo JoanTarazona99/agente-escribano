@@ -1,0 +1,4 @@
+-r base.txt
+
+# Base de datos PostgreSQL para producción
+psycopg[binary]>=3.2,<4.0

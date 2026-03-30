@@ -1,0 +1,83 @@
+# ─── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+.installed.cfg
+lib/
+lib64/
+.eggs/
+
+# ─── Entornos virtuales ───────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+.ENV/
+
+# ─── Django ──────────────────────────────────────────────
+*.sqlite3
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# ─── Variables de entorno ────────────────────────────────
+.env
+.env.dev
+.env.prod
+.env.local
+!.env.example
+
+# ─── Node.js / React ──────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+.pnp
+.pnp.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# ─── Testing ─────────────────────────────────────────────
+.coverage
+htmlcov/
+.tox/
+.cache
+.pytest_cache/
+coverage/
+*.lcov
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ─── IDEs ────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Docker ──────────────────────────────────────────────
+.dockerignore

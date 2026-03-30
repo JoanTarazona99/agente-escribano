@@ -1,0 +1,127 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "search": "Search",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "title": "Agent Escribano — EMS",
+    "description": "Search and analysis of scientific articles on water molecule dissociation/recombination in electromembrane systems.",
+    "stat_total": "Total articles",
+    "stat_ai_processed": "AI processed",
+    "start_search": "Start new search",
+    "recent": "Recent articles",
+    "see_all": "See all {{count}} articles"
+  },
+  "search": {
+    "title": "Search scientific articles",
+    "subtitle": "Search in arXiv, eLIBRARY, Scopus and Web of Science",
+    "form_label": "Search form",
+    "query_label": "Search query",
+    "sources_label": "Data sources",
+    "max_per_source_label": "Max per source",
+    "submit": "Search",
+    "searching": "Searching…",
+    "filter_text": "Filter by text…",
+    "filter_all_sources": "All sources",
+    "filter_all_types": "All types",
+    "source_unavailable": "This source requires a paid API key that is not yet configured.",
+    "coming_soon": "Coming soon",
+    "results_count": "{{count}} articles",
+    "no_results": "No articles found. Try a different query.",
+    "load_more": "Load more ({{shown}} of {{total}})",
+    "sources_title": "Sources",
+    "select_article": "Select an article",
+    "select_article_desc": "Choose a source from the left panel to view summary and analysis."
+  },
+  "article": {
+    "abstract": "Abstract",
+    "keywords": "Keywords",
+    "open_source": "View source",
+    "download_pdf": "Download PDF",
+    "ai_processed": "Processed by AI",
+    "ai_analysis_title": "Artificial Intelligence Analysis",
+    "ai_summary": "Summary",
+    "ai_full_analysis": "Detailed analysis",
+    "ai_not_processed": "This article has not yet been analyzed by the AI model.",
+    "analyze": "Analyze with AI",
+    "reanalyze": "Re-analyze",
+    "analyzing": "Analyzing…",
+    "analyzing_bg": "Analysis in progress… Page will update automatically.",
+    "analyze_error": "Error analyzing: {{message}}",
+    "more_options": "More options",
+    "rename": "Rename",
+    "delete": "Delete source",
+    "confirm_delete": "Are you sure you want to delete this article? This action cannot be undone."
+  },
+  "article_type": {
+    "theoretical": "Theoretical",
+    "experimental": "Experimental",
+    "review": "Review",
+    "mixed": "Theoretical-Experimental",
+    "unknown": "Undetermined"
+  },
+  "job": {
+    "status": {
+      "pending": "Queued…",
+      "running": "Search in progress…",
+      "completed": "Search completed",
+      "failed": "Search failed"
+    },
+    "completed_detail": "{{found}} found · {{saved}} saved/updated"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Interface language",
+    "language_description": "Select the language for the interface and translated content.",
+    "api_keys": "API Keys",
+    "api_keys_description": "Status of credentials for academic databases.",
+    "key_pending": "Pending configuration in .env",
+    "key_not_required": "No key required",
+    "system_status": "System Status",
+    "health_error": "Could not connect to backend.",
+    "database": "Database",
+    "models_available": "models available",
+    "stats": "Statistics",
+    "articles": "articles",
+    "ai_analyzed": "AI analyzed"
+  },
+  "create_notebook": "Create Notebook",
+  "notebook_title_placeholder": "My new notebook…",
+  "notebook_empty": "This notebook is empty. Start a search to add articles.",
+  "article": "article",
+  "articles": "articles",
+  "confirm_delete": "Are you sure you want to delete this notebook? This action cannot be undone.",
+  "creating": "Creating…",
+  "cancel": "Cancel",
+  "create": "Create",
+  "delete": "Delete",
+  "start_search": "Start search",
+  "home": {
+    "title": "My Notebooks",
+    "subtitle": "Organize and analyze scientific articles on EMS",
+    "new_notebook": "New Notebook",
+    "empty": "You don't have any notebooks yet. Create one to start organizing your articles."
+  },
+  "notebook": {
+    "sources": "Sources",
+    "add_source": "Add sources",
+    "search_databases": "Search databases",
+    "remove_source": "Remove source",
+    "search_articles": "Search articles to add…",
+    "type_to_search": "Type to search articles in the database",
+    "no_articles_found": "No articles found",
+    "empty_hint": "Add articles from search to get started",
+    "select_source": "Select a source",
+    "select_source_desc": "Choose an article from the left panel to view its details and analysis.",
+    "click_to_rename": "Double-click to rename",
+    "search_placeholder": "Search arXiv, eLIBRARY, Scopus…",
+    "drop_or_click": "Drop files here or click to select",
+    "drop_formats": "PDF, images, documents and audio, and more"
+  },
+  "common": {
+    "loading": "Loading…",
+    "not_found": "Not found",
+    "back": "Back"
+  }
+}

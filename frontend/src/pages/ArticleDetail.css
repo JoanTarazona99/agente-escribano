@@ -1,0 +1,184 @@
+.detail { display: flex; flex-direction: column; gap: 20px; position: relative; }
+
+.detail__close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.detail__close:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+@media (max-width: 768px) {
+  .detail__close { display: flex; }
+}
+
+.detail__header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.detail__type {
+  font-size: 0.75rem;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.detail__title { font-size: 1.25rem; font-weight: 700; line-height: 1.4; }
+
+.detail__authors { color: var(--color-text-muted); font-size: 0.85rem; }
+
+.detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.detail__section h2 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.detail__abstract {
+  line-height: 1.7;
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+/* ── Botón PDF ──────────────────────────────────────────── */
+.detail__pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 0.18s, transform 0.15s;
+  width: fit-content;
+}
+
+.detail__pdf-btn:hover {
+  background: var(--color-primary-dark);
+  color: #fff;
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.detail__keywords { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.detail__keyword {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.detail__ai-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.detail__ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.detail__ai-header h2 { margin-bottom: 0; }
+
+.detail__analyze-btn {
+  padding: 6px 16px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.detail__analyze-btn:hover:not(:disabled) { background: var(--color-primary-dark); }
+.detail__analyze-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.detail__analyze-btn--reanalyze { background: #52525b; }
+.detail__analyze-btn--reanalyze:hover:not(:disabled) { background: #71717a; }
+
+.detail__ai-block { margin-top: 16px; }
+
+.detail__ai-block h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail__ai-block p {
+  line-height: 1.7;
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.detail__ai-analysis {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: var(--font);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  background: var(--color-surface-alt);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-primary);
+  max-height: 500px;
+  overflow-y: auto;
+  color: var(--color-text);
+}
+
+.detail__ai-empty { color: var(--color-text-muted); font-size: 0.82rem; }
+
+.detail__ai-pending {
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-style: italic;
+  padding: 6px 0;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.detail__loading { color: var(--color-text-muted); font-size: 0.9rem; }
