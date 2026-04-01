@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
-from apps.articles.models import Article, SearchJob, SourceDatabase
+from apps.articles.models import Article, SearchJob, SourceDatabase, Notebook
 
 from .connectors import (
     ArxivConnector,
@@ -18,6 +19,7 @@ from .connectors import (
 )
 
 logger = logging.getLogger(__name__)
+LOG_PATH = Path(__file__).resolve().parent.parent.parent / "orchestrator_debug.log"
 
 DEFAULT_QUERY = (
     "dissociation recombination water molecules electromembrane systems "
@@ -84,6 +86,13 @@ class SearchOrchestrator:
 
             try:
                 articles_data = connector.search(query, max_results=self.max_per_source)
+                try:
+                    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(
+                            f"SOURCE {source} FOUND {len(articles_data)} JOB {getattr(job, 'pk', 'unknown')}\n"
+                        )
+                except Exception:
+                    logger.exception("No se pudo escribir debug tras búsqueda")
             except NotImplementedError as exc:
                 logger.warning("Conector %s: %s", source, exc)
                 results[source] = 0
@@ -96,10 +105,14 @@ class SearchOrchestrator:
             saved_instances, count = self._save_articles(articles_data)
             all_articles.extend(saved_instances)
             results[source] = count
-            total_found += len(articles_data)
+            # contabilizamos los guardados explícitamente; para evitar discrepancias
+            # calculamos el total encontrado tras el guardado usando las instancias
+            # retornadas por _save_articles (incluye artículos existentes y nuevos).
             total_saved += count
-            logger.info("Fuente %s: %d encontrados, %d guardados.", source, len(articles_data), count)
+            logger.info("Fuente %s: %d procesados, %d guardados.", source, len(saved_instances), count)
 
+        # Recalcular totales a partir de las instancias realmente asociadas
+        total_found = len(all_articles)
         if job:
             job.status = SearchJob.Status.COMPLETED
             job.total_found = total_found
@@ -109,9 +122,39 @@ class SearchOrchestrator:
             if all_articles:
                 job.articles.set(all_articles)
 
-        # Auto-agregar artículos al cuaderno si se proporcionó
+        # Auto-agregar artículos al cuaderno si se proporcionó.
+        # Re-obtenemos la instancia de `Notebook` desde la base de datos
+        # dentro del hilo de fondo para evitar problemas de compartir
+        # instancias de modelo entre hilos.
         if notebook and all_articles:
-            notebook.articles.add(*all_articles)
+            try:
+                if hasattr(notebook, "pk"):
+                    nb = Notebook.objects.get(pk=notebook.pk)
+                else:
+                    nb = Notebook.objects.get(pk=int(notebook))
+                # Debugging: write pre/post counts to a file to inspect threaded behavior
+                try:
+                    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(f"JOB {getattr(job, 'pk', 'unknown')} NOTEBOOK {nb.pk} PRE_COUNT {nb.articles.count()} ADDING {len(all_articles)}\n")
+                except Exception:
+                    logger.exception("No se pudo escribir debug antes de add()")
+
+                nb.articles.add(*all_articles)
+
+                try:
+                    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(f"JOB {getattr(job, 'pk', 'unknown')} NOTEBOOK {nb.pk} POST_COUNT {nb.articles.count()}\n")
+                except Exception:
+                    logger.exception("No se pudo escribir debug despues de add()")
+            except Notebook.DoesNotExist:
+                logger.warning("Notebook %s no existe al intentar agregar artículos.", getattr(notebook, "pk", notebook))
+            except Exception as exc:
+                logger.exception("Error añadiendo artículos al cuaderno: %s", exc)
+                try:
+                    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(f"JOB {getattr(job, 'pk', 'unknown')} NOTEBOOK {getattr(notebook,'pk',notebook)} EXC {exc}\n")
+                except Exception:
+                    logger.exception("No se pudo escribir debug en excepción")
 
         return results
 
@@ -130,7 +173,7 @@ class SearchOrchestrator:
                         defaults=self._to_model_fields(data),
                     )
                 elif data.source_id:
-                    obj, created = Article.objects.get_or_create(
+                    obj, created = Article.objects.update_or_create(
                         source_db=data.source_db,
                         source_id=data.source_id,
                         defaults=self._to_model_fields(data),
@@ -143,6 +186,11 @@ class SearchOrchestrator:
                     saved += 1
             except Exception as exc:
                 logger.error("Error guardando artículo '%s': %s", data.title[:60], exc)
+                try:
+                    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                        fh.write(f"ERROR SAVING ARTICLE {data.title[:200]} EXC {exc}\n")
+                except Exception:
+                    logger.exception("No se pudo escribir debug de guardado")
 
         return instances, saved
 

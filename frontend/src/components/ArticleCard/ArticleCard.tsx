@@ -10,6 +10,7 @@ interface ArticleCardProps {
   onSelect?: () => void;
   onDelete?: (id: number) => void;
   onRename?: (id: number, newTitle: string) => void;
+  showAuthors?: boolean;
 }
 
 function formatAuthors(authors: string): string {
@@ -18,7 +19,7 @@ function formatAuthors(authors: string): string {
   return `${parts.slice(0, 3).join(", ")} et al.`;
 }
 
-export default function ArticleCard({ article, isSelected = false, onSelect, onDelete, onRename }: ArticleCardProps) {
+export default function ArticleCard({ article, isSelected = false, onSelect, onDelete, onRename, showAuthors = true }: ArticleCardProps) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language.slice(0, 2);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -154,7 +155,7 @@ export default function ArticleCard({ article, isSelected = false, onSelect, onD
           </h3>
         )}
 
-        {article.authors && (
+        {showAuthors && article.authors && (
           <p className="article-card__authors">
             {formatAuthors(article.authors)}
           </p>

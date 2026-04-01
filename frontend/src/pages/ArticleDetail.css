@@ -1,4 +1,12 @@
-.detail { display: flex; flex-direction: column; gap: 20px; position: relative; }
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
 
 .detail__close {
   position: absolute;
@@ -36,9 +44,20 @@
   border-radius: var(--radius-sm);
 }
 
-.detail__title { font-size: 1.25rem; font-weight: 700; line-height: 1.4; }
+.detail__title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
-.detail__authors { color: var(--color-text-muted); font-size: 0.85rem; }
+.detail__authors {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 .detail__meta {
   display: flex;
@@ -46,6 +65,12 @@
   gap: 12px;
   font-size: 0.82rem;
   color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.detail__meta a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .detail__section h2 {
@@ -59,6 +84,8 @@
   line-height: 1.7;
   color: var(--color-text);
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Botón PDF ──────────────────────────────────────────── */
@@ -149,11 +176,14 @@
   line-height: 1.7;
   margin: 0;
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .detail__ai-analysis {
   white-space: pre-wrap;
   word-wrap: break-word;
+  overflow-wrap: anywhere;
   font-family: var(--font);
   font-size: 0.85rem;
   line-height: 1.7;

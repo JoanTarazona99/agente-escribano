@@ -1,4 +1,10 @@
-/* ─── Notebook Page — NotebookLM-style two-panel layout ─── */
+/* ─── Notebook Page — NotebookLM-style three-panel layout ─── */
+
+/* Override .app__main padding & scroll — Notebook fills full viewport area */
+.app__main:has(.nb-page) {
+  padding: 0;
+  overflow: hidden;
+}
 
 .nb-page {
   display: flex;
@@ -133,51 +139,166 @@
   color: var(--color-danger);
 }
 
-/* ─── Workspace: Two-panel layout ─── */
+/* ═══════════════════════════════════════════════════
+   Workspace: Three-panel layout (Sources | Detail | Studio)
+   ═══════════════════════════════════════════════════ */
 
 .nb-workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  /* Sources 408px (~20% wider than old 340px) | flex center | Studio 300px */
+  grid-template-columns: 408px minmax(0, 1fr) 300px;
   overflow: hidden;
+  transition: grid-template-columns 0.25s ease;
 }
 
-/* ─── Left: Sources panel ─── */
+.nb-workspace--sources-closed {
+  grid-template-columns: 48px minmax(0, 1fr) 300px;
+}
 
-.nb-sources {
+.nb-workspace--studio-closed {
+  grid-template-columns: 408px minmax(0, 1fr) 48px;
+}
+
+.nb-workspace--sources-closed.nb-workspace--studio-closed {
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+}
+
+/* ─── Shared panel styles (left + right side panels) ─── */
+
+.nb-panel {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--color-border);
   overflow: hidden;
   background-color: var(--color-surface);
+  transition: width 0.25s ease;
 }
 
-.nb-sources__header {
+.nb-panel--collapsed .nb-panel__body {
+  display: none;
+}
+
+.nb-panel__header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s;
 }
 
-.nb-sources__title {
-  font-size: 14px;
+.nb-panel__header:hover {
+  background-color: var(--color-surface-alt);
+}
+
+.nb-panel__title {
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0;
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nb-panel--collapsed .nb-panel__title {
+  display: none;
+}
+
+.nb-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+/* Left panel: ‹ arrow points left when open, right when collapsed */
+.nb-sources .nb-panel__toggle--open {
+  transform: rotate(0deg);
+}
+.nb-sources .nb-panel__toggle:not(.nb-panel__toggle--open) {
+  transform: rotate(180deg);
+}
+
+/* Right panel: › arrow points right when open, left when collapsed */
+.nb-studio .nb-panel__toggle--open {
+  transform: rotate(0deg);
+}
+.nb-studio .nb-panel__toggle:not(.nb-panel__toggle--open) {
+  transform: rotate(180deg);
+}
+
+.nb-panel__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ─── Custom scrollbars — always visible, NotebookLM style ─── */
+
+.nb-sources__list,
+.nb-detail__scroll,
+.nb-studio__content {
+  overflow-y: scroll;            /* always show scrollbar rail */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) rgba(255,255,255,0.05);
+}
+
+.nb-sources__list::-webkit-scrollbar,
+.nb-detail__scroll::-webkit-scrollbar,
+.nb-studio__content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nb-sources__list::-webkit-scrollbar-track,
+.nb-detail__scroll::-webkit-scrollbar-track,
+.nb-studio__content::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+}
+
+.nb-sources__list::-webkit-scrollbar-thumb,
+.nb-detail__scroll::-webkit-scrollbar-thumb,
+.nb-studio__content::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,0.16);
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.nb-sources__list::-webkit-scrollbar-thumb:hover,
+.nb-detail__scroll::-webkit-scrollbar-thumb:hover,
+.nb-studio__content::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255,255,255,0.28);
+}
+
+/* ═══ LEFT: Sources panel ═══ */
+
+.nb-sources {
+  border-right: 1px solid var(--color-border);
 }
 
 .nb-sources__count {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-muted);
   background-color: var(--color-surface-alt);
   padding: 2px 8px;
   border-radius: 10px;
+  flex-shrink: 0;
 }
 
-/* ─── + Añadir fuentes button (centrado, estilo NotebookLM) ─── */
+/* ─── + Añadir fuentes ─── */
 
 .nb-sources__add-btn {
   display: flex;
@@ -186,7 +307,7 @@
   gap: 6px;
   width: calc(100% - 24px);
   margin: 10px 12px 0;
-  padding: 9px 14px;
+  padding: 7px 12px;
   font-size: 13px;
   font-weight: 500;
   border: 1px dashed var(--color-border);
@@ -196,6 +317,9 @@
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
+  text-align: center;
+  line-height: 1;
+  font: inherit;
 }
 
 .nb-sources__add-btn:hover {
@@ -204,7 +328,7 @@
   background-color: var(--color-primary-bg);
 }
 
-/* ─── Inline search (siempre visible, estilo NotebookLM) ─── */
+/* ─── Inline search ─── */
 
 .nb-inline-search {
   margin: 10px 12px;
@@ -316,6 +440,7 @@
   transition: background-color 0.15s;
   line-height: 1;
   padding: 0;
+  font: inherit;
 }
 
 .nb-inline-search__go:hover:not(:disabled) {
@@ -331,7 +456,7 @@
 
 .nb-sources__dropzone {
   margin: 10px 12px;
-  padding: 24px 16px;
+  padding: 16px 12px;
   border: 2px dashed var(--color-border);
   border-radius: var(--radius);
   background-color: var(--color-bg);
@@ -348,20 +473,20 @@
 }
 
 .nb-sources__dropzone-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: 22px;
+  margin-bottom: 6px;
   opacity: 0.6;
 }
 
 .nb-sources__dropzone-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0 0 4px 0;
 }
 
 .nb-sources__dropzone-hint {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-muted);
   margin: 0;
 }
@@ -397,15 +522,9 @@
   padding: 2px 4px;
   flex-shrink: 0;
 }
+
 .nb-sources__dropped-remove:hover {
   color: var(--color-danger);
-}
-
-.nb-sources__search-panel-wrap {
-  border-bottom: 1px solid var(--color-border);
-  padding: 12px;
-  background-color: var(--color-bg);
-  flex-shrink: 0;
 }
 
 /* ─── Progress indicator ─── */
@@ -478,7 +597,7 @@
 
 .nb-sources__list {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 4px 0;
 }
 
@@ -507,7 +626,7 @@
 }
 
 .nb-sources__empty-cta {
-  padding: 8px 16px;
+  padding: 7px 12px;
   background-color: var(--color-primary);
   color: white;
   border: none;
@@ -515,6 +634,8 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
+  line-height: 1;
+  font: inherit;
 }
 
 .nb-sources__empty-cta:hover {
@@ -538,6 +659,8 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color 0.15s;
+  line-height: 1;
+  font: inherit;
 }
 
 .nb-sources__load-more-btn:hover:not(:disabled) {
@@ -549,21 +672,23 @@
   cursor: not-allowed;
 }
 
-/* ─── Right: Detail panel ─── */
+/* ═══ CENTER: Detail panel ═══ */
 
 .nb-detail {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
+  min-width: 0;
   background-color: var(--color-bg);
 }
 
-.nb-detail--visible {
-  /* activated via mobile responsive rules below */
-  display: flex;
+.nb-detail__scroll {
+  flex: 1;
+  overflow-y: scroll;
+  padding: 20px 24px 24px;
 }
 
-/* ─── Empty state (right panel) ─── */
+/* ─── Empty state (center panel) ─── */
 
 .nb-detail__empty {
   display: flex;
@@ -594,7 +719,209 @@
   max-width: 300px;
 }
 
-/* ─── Responsive ─── */
+/* ═══ RIGHT: Studio panel ═══ */
+
+.nb-studio {
+  border-left: 1px solid var(--color-border);
+}
+
+.nb-studio__content {
+  flex: 1;
+  overflow-y: scroll;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nb-studio__article-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.nb-studio__article-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ─── Studio sections ─── */
+
+.nb-studio__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nb-studio__section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.nb-studio__section-icon {
+  font-size: 14px;
+}
+
+/* ─── Action buttons (NotebookLM style) ─── */
+
+.nb-studio__action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  font: inherit;
+}
+
+.nb-studio__action-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-bg);
+}
+
+.nb-studio__action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.nb-studio__action-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.nb-studio__action-text {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.nb-studio__action-arrow {
+  font-size: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.nb-studio__pending {
+  font-size: 12px;
+  color: var(--color-primary);
+  margin: 0;
+  padding: 4px 0;
+  animation: nb-pulse 1.5s infinite;
+}
+
+.nb-studio__done {
+  font-size: 12px;
+  color: var(--color-secondary);
+  margin: 0;
+  padding: 4px 0;
+}
+
+@keyframes nb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ─── AI result blocks in studio ─── */
+
+.nb-studio__ai-block {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.nb-studio__ai-block h5 {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-text-muted);
+}
+
+.nb-studio__ai-block p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.nb-studio__ai-pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text);
+  font-family: inherit;
+}
+
+/* ─── Studio empty state ─── */
+
+.nb-studio__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.nb-studio__empty-icon {
+  font-size: 40px;
+  opacity: 0.3;
+}
+
+.nb-studio__empty p {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+  max-width: 200px;
+}
+
+/* ═══ Responsive ═══ */
+
+@media (max-width: 1024px) {
+  .nb-workspace {
+    grid-template-columns: 300px minmax(0, 1fr) 260px;
+  }
+
+  .nb-workspace--sources-closed {
+    grid-template-columns: 48px minmax(0, 1fr) 260px;
+  }
+
+  .nb-workspace--studio-closed {
+    grid-template-columns: 300px minmax(0, 1fr) 48px;
+  }
+
+  .nb-workspace--sources-closed.nb-workspace--studio-closed {
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+  }
+}
 
 @media (max-width: 768px) {
   .nb-workspace {
@@ -602,9 +929,19 @@
     position: relative;
   }
 
+  .nb-workspace--sources-closed,
+  .nb-workspace--studio-closed,
+  .nb-workspace--sources-closed.nb-workspace--studio-closed {
+    grid-template-columns: 1fr;
+  }
+
   .nb-sources {
     border-right: none;
-    height: 100%;
+  }
+
+  .nb-studio {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
   }
 
   .nb-detail {
@@ -618,15 +955,11 @@
     background-color: var(--color-bg);
   }
 
-  .nb-detail--visible {
-    display: flex;
-  }
-
   .nb-header__title {
     font-size: 16px;
   }
 
   .nb-sources__filter-selects {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 }

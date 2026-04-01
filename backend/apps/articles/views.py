@@ -30,6 +30,11 @@ class ArticleFilter(django_filters.FilterSet):
         lookup_expr="exact",
         label="ID del SearchJob",
     )
+    searchjob = django_filters.NumberFilter(
+        field_name="search_jobs",
+        lookup_expr="exact",
+        label="Alias legado de job",
+    )
     notebook = django_filters.NumberFilter(
         field_name="notebooks",
         lookup_expr="exact",

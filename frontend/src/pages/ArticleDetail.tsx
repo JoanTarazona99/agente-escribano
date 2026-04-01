@@ -1,6 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { getArticle, analyzeArticle } from "@/services/api";
+import { getArticle } from "@/services/api";
 import MathText from "@/components/MathText/MathText";
 import type { Article } from "@/types";
 import "./ArticleDetail.css";
@@ -19,7 +19,6 @@ interface ArticleDetailProps {
 
 export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps) {
   const { t, i18n } = useTranslation();
-  const queryClient = useQueryClient();
   const lang = i18n.language.slice(0, 2);
   const idStr = String(articleId);
 
@@ -27,17 +26,6 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
     queryKey: ["article", idStr],
     queryFn: () => getArticle(articleId),
     enabled: articleId > 0,
-  });
-
-  const analyzeMutation = useMutation({
-    mutationFn: () => analyzeArticle(articleId),
-    onSuccess: (data) => {
-      // El POST síncrono devuelve el artículo ya procesado — actualizar caché
-      queryClient.setQueryData(["article", idStr], data);
-    },
-    onError: (error: Error) => {
-      alert(t("article.analyze_error", { message: error.message }));
-    },
   });
 
   if (isLoading) return <p className="detail__loading">{t("common.loading")}</p>;
@@ -128,64 +116,38 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
         </section>
       )}
 
-      {/* AI Block */}
-      <section className="detail__section detail__ai-section">
-        <div className="detail__ai-header">
+      {/* AI Results (read-only — analyze button is in Studio panel) */}
+      {article.ai_processed && (
+        <section className="detail__section detail__ai-section">
           <h2>{t("article.ai_analysis_title")}</h2>
-          {!article.ai_processed && (
-            <button
-              className="detail__analyze-btn"
-              onClick={() => analyzeMutation.mutate()}
-              disabled={analyzeMutation.isPending}
-            >
-              {analyzeMutation.isPending ? t("article.analyzing") : t("article.analyze")}
-            </button>
-          )}
-          {article.ai_processed && (
-            <button
-              className="detail__analyze-btn detail__analyze-btn--reanalyze"
-              onClick={() => analyzeMutation.mutate()}
-              disabled={analyzeMutation.isPending}
-            >
-              {analyzeMutation.isPending ? t("article.analyzing") : t("article.reanalyze")}
-            </button>
-          )}
-        </div>
 
-        {analyzeMutation.isPending && (
-          <p className="detail__ai-pending">{t("article.analyzing_bg")}</p>
-        )}
+          {(() => {
+            const summary =
+              lang === "ru" ? (article.ai_summary_ru || article.ai_summary)
+              : lang === "es" ? (article.ai_summary_es || article.ai_summary)
+              : (article.ai_summary_en || article.ai_summary);
+            return summary ? (
+              <div className="detail__ai-block">
+                <h3>{t("article.ai_summary")}</h3>
+                <p>{summary}</p>
+              </div>
+            ) : null;
+          })()}
 
-        {(() => {
-          const summary =
-            lang === "ru" ? (article.ai_summary_ru || article.ai_summary)
-            : lang === "es" ? (article.ai_summary_es || article.ai_summary)
-            : (article.ai_summary_en || article.ai_summary);
-          return summary ? (
-            <div className="detail__ai-block">
-              <h3>{t("article.ai_summary")}</h3>
-              <p>{summary}</p>
-            </div>
-          ) : null;
-        })()}
-
-        {(() => {
-          const analysis =
-            lang === "ru" ? (article.ai_analysis_ru || article.ai_analysis)
-            : lang === "es" ? (article.ai_analysis_es || article.ai_analysis)
-            : (article.ai_analysis_en || article.ai_analysis);
-          return analysis ? (
-            <div className="detail__ai-block">
-              <h3>{t("article.ai_full_analysis")}</h3>
-              <pre className="detail__ai-analysis">{analysis}</pre>
-            </div>
-          ) : null;
-        })()}
-
-        {!article.ai_processed && !analyzeMutation.isPending && (
-          <p className="detail__ai-empty">{t("article.ai_not_processed")}</p>
-        )}
-      </section>
+          {(() => {
+            const analysis =
+              lang === "ru" ? (article.ai_analysis_ru || article.ai_analysis)
+              : lang === "es" ? (article.ai_analysis_es || article.ai_analysis)
+              : (article.ai_analysis_en || article.ai_analysis);
+            return analysis ? (
+              <div className="detail__ai-block">
+                <h3>{t("article.ai_full_analysis")}</h3>
+                <pre className="detail__ai-analysis">{analysis}</pre>
+              </div>
+            ) : null;
+          })()}
+        </section>
+      )}
     </div>
   );
 }

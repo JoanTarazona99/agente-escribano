@@ -54,23 +54,32 @@ TRANSLATE_TO_RU_PROMPT = """Переведи следующий научный �
 Текст:
 {text}"""
 
-SUMMARIZE_PROMPT = """Составь резюме следующей научной статьи на 200-250 слов на русском языке.
+SUMMARIZE_PROMPT = """Составь резюме следующей научной статьи на русском языке.
 Отрази: основную цель, методологию, ключевые результаты, выводы и применимость.
-Будь подробным, но кратким.
+
+ОГРАНИЧЕНИЯ ПО ДЛИНЕ: резюме должно содержать от 150 до 250 слов.
+ОБЯЗАТЕЛЬНО доведи текст до логического завершения. Не обрывай предложения.
+Если нужно сократить — перефразируй, но НИКОГДА не оставляй текст незавершённым.
 
 Название: {title}
 Аннотация: {abstract}
 
 Резюме:"""
 
-ANALYZE_PROMPT = """Проанализируй следующую статью и верни структурированный отчёт на русском языке:
+ANALYZE_PROMPT = """Проанализируй статью и верни краткий структурированный отчёт на русском языке.
 
-1. **ТИП**: (теоретическая / экспериментальная / обзор / теоретико-экспериментальная)
-2. **МЕТОДОЛОГИЯ**: Используемые техники и методы (2-3 предложения)
-3. **КЛЮЧЕВЫЕ РЕЗУЛЬТАТЫ**: Основные выводы (2-3 пункта)
-4. **РЕЛЕВАНТНОСТЬ ЭМС**: Как связано с диссоциацией/рекомбинацией воды в электромембранных системах?
-5. **ОГРАНИЧЕНИЯ**: Неохваченные аспекты или слабые стороны исследования
-6. **ОЦЕНКА РЕЛЕВАНТНОСТИ**: 1-10 (10 = непосредственно о диссоциации H₂O в ЭМС)
+Требования:
+- Общая длина: 200–350 слов. Будь краток.
+- НАПИШИ ВСЕ 6 секций полностью. Не обрывай ни одну.
+- После секции 6 напиши слово «КОНЕЦ» на отдельной строке.
+
+Секции:
+1. **ТИП**: одно слово (теоретическая / экспериментальная / обзор / смешанная)
+2. **МЕТОДОЛОГИЯ**: Техники и методы (1-2 предложения)
+3. **КЛЮЧЕВЫЕ РЕЗУЛЬТАТЫ**: Основные выводы (2-3 пункта, по 1 предложению)
+4. **РЕЛЕВАНТНОСТЬ ЭМС**: Связь с диссоциацией/рекомбинацией воды в ЭМС (1-2 предложения)
+5. **ОГРАНИЧЕНИЯ**: Слабые стороны (1-2 предложения)
+6. **ОЦЕНКА**: N/10 — краткое обоснование в 1 предложении
 
 Название: {title}
 Аннотация: {abstract}
@@ -86,7 +95,7 @@ class OllamaService:
     def __init__(self) -> None:
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         self.model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
-        self.client = ollama.Client(host=base_url, timeout=60.0)  # 60 segundos de timeout
+        self.client = ollama.Client(host=base_url, timeout=120.0)
         self.logger = logger
 
     def _chat(self, prompt: str, *, temperature: float = 0.3) -> str:
@@ -98,7 +107,7 @@ class OllamaService:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                options={"temperature": temperature},
+                options={"temperature": temperature, "num_predict": 4096},
             )
             return response["message"]["content"].strip()
         except Exception as exc:
@@ -168,7 +177,21 @@ class OllamaService:
             title=title or "(sin título)",
             abstract=abstract or "(sin abstract)",
         )
-        return self._chat(prompt, temperature=0.3)
+        result = self._chat(prompt, temperature=0.3)
+
+        # Limpiar marca de fin si el modelo la escribió
+        result = result.replace("КОНЕЦ", "").strip()
+
+        # Detectar truncamiento: si falta alguna sección, logear advertencia
+        for marker in ["ТИП", "МЕТОДОЛОГИЯ", "КЛЮЧЕВЫЕ РЕЗУЛЬТАТЫ",
+                        "РЕЛЕВАНТНОСТЬ ЭМС", "ОГРАНИЧЕНИЯ", "ОЦЕНКА"]:
+            if marker not in result:
+                self.logger.warning(
+                    "Análisis posiblemente truncado: falta sección '%s'", marker
+                )
+                break
+
+        return result
 
     def process_article(self, article) -> None:  # noqa: ANN001
         """

@@ -1,34 +1,26 @@
-"""Conector para arXiv.org — API Atom pública, sin credenciales requeridas."""
+"""Conector para arXiv.org — búsqueda HTML pública, sin credenciales requeridas."""
 from __future__ import annotations
 
+import json
+import subprocess
 import time
-import xml.etree.ElementTree as ET
+from pathlib import Path
 
-import httpx
+from bs4 import BeautifulSoup
 
 from .base import ArticleData, BaseSearchConnector
 
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-NS = {
-    "atom": "http://www.w3.org/2005/Atom",
-    "arxiv": "http://arxiv.org/schemas/atom",
-    "opensearch": "http://a9.com/-/spec/opensearch/1.1/",
-}
+ARXIV_SEARCH_URL = "https://arxiv.org/search/"
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+FRONTEND_ROOT = PROJECT_ROOT / "frontend"
 
-# arXiv requiere mínimo 3 s entre peticiones; User-Agent recomendado
+# arXiv puede rechazar scraping agresivo; mantenemos una pausa corta entre reintentos.
 _RATE_LIMIT_DELAY = 3.0
-HEADERS = {
-    "User-Agent": (
-        "AgenteEscribano/1.0 (research tool; contact: admin@example.com) "
-        "httpx/0.28"
-    )
-}
-
 
 class ArxivConnector(BaseSearchConnector):
     """
-    Conector para arXiv usando la API Atom oficial.
-    Docs: https://arxiv.org/help/api/user-manual
+    Conector para arXiv usando la página HTML pública de búsqueda.
+    Docs: https://arxiv.org/search/
     """
 
     SOURCE_DB = "arxiv"
@@ -37,80 +29,138 @@ class ArxivConnector(BaseSearchConnector):
         """
         Busca artículos en arXiv.
 
-        La query se envía como `search_query=all:{query}`.
-        httpx se encarga del URL-encoding; NO usar quote_plus aquí.
+        La query se envía como búsqueda HTML normal en `search/?query=...`.
         """
         self.logger.info("arXiv search: %s (max=%d)", query, max_results)
 
-        # Construimos la URL manualmente para evitar doble-encoding por httpx
-        search_query = f"all:{query}"
-        url = (
-            f"{ARXIV_API_URL}"
-            f"?search_query={search_query.replace(' ', '+')}"
-            f"&start=0"
-            f"&max_results={max_results}"
-            f"&sortBy=relevance"
-            f"&sortOrder=descending"
-        )
+        params = {
+            "query": query,
+            "searchtype": "all",
+            "size": 50,
+        }
 
         retries = 3
         for attempt in range(retries):
             try:
-                with httpx.Client(timeout=30.0, headers=HEADERS) as client:
-                    response = client.get(url)
-                    if response.status_code == 429:
-                        wait = _RATE_LIMIT_DELAY * (attempt + 2)
-                        self.logger.warning("arXiv 429 rate-limit, esperando %.0fs…", wait)
-                        time.sleep(wait)
-                        continue
-                    response.raise_for_status()
-                    return self._parse_response(response.text)
-            except httpx.HTTPError as exc:
-                self.logger.error("arXiv HTTP error (intento %d): %s", attempt + 1, exc)
+                html = self._fetch_html(params)
+                if html:
+                    return self._parse_response(html)[:max_results]
+            except Exception as exc:
+                self.logger.error("arXiv HTML error (intento %d): %s", attempt + 1, exc)
                 if attempt < retries - 1:
                     time.sleep(_RATE_LIMIT_DELAY)
 
         return []
 
-    def _parse_response(self, xml_text: str) -> list[ArticleData]:
-        """Parsea la respuesta Atom XML de arXiv."""
-        root = ET.fromstring(xml_text)
+    def _fetch_html(self, params: dict[str, object]) -> str:
+        """Obtiene el HTML de búsqueda de arXiv usando Playwright de Node."""
+        query = str(params.get("query", ""))
+        size = int(params.get("size", 50))
+        url = f"{ARXIV_SEARCH_URL}?query={query.replace(' ', '+')}&searchtype=all&size={size}"
+
+        script = f"""
+const {{ chromium }} = require('playwright');
+(async() => {{
+  const browser = await chromium.launch({{ headless: true }});
+  const page = await browser.newPage();
+  await page.goto({json.dumps(url)}, {{ waitUntil: 'domcontentloaded', timeout: 60000 }});
+  await page.waitForSelector('li.arxiv-result', {{ timeout: 30000 }}).catch(() => null);
+  process.stdout.write(await page.content());
+  await browser.close();
+}})().catch(err => {{
+  console.error(err);
+  process.exit(1);
+}});
+"""
+
+        completed = subprocess.run(
+            ["node", "-e", script],
+            cwd=FRONTEND_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(stderr or f"Playwright node exited with code {completed.returncode}")
+
+        return completed.stdout
+
+    def _parse_response(self, html_text: str) -> list[ArticleData]:
+        """Parsea la respuesta HTML de arXiv."""
+        soup = BeautifulSoup(html_text, "html.parser")
         articles: list[ArticleData] = []
 
-        for entry in root.findall("atom:entry", NS):
-            title_el = entry.find("atom:title", NS)
-            summary_el = entry.find("atom:summary", NS)
-            published_el = entry.find("atom:published", NS)
-            id_el = entry.find("atom:id", NS)
+        for entry in soup.select("li.arxiv-result"):
+            title_link = entry.select_one("p.title a")
+            title_el = entry.select_one("p.title")
+            authors_el = entry.select_one("p.authors")
+            abstract_el = entry.select_one("span.abstract-full") or entry.select_one("span.abstract-short")
+            meta_el = entry.select_one("p.is-size-7")
 
-            title = (title_el.text or "").strip().replace("\n", " ") if title_el is not None else ""
-            abstract = (summary_el.text or "").strip() if summary_el is not None else ""
-            arxiv_url = (id_el.text or "").strip() if id_el is not None else ""
-            arxiv_id = arxiv_url.split("/abs/")[-1] if "/abs/" in arxiv_url else ""
+            title = ""
+            arxiv_url = ""
+            arxiv_id = ""
+            if title_el:
+                title = title_el.get_text(" ", strip=True)
+                if title.lower().startswith("title:"):
+                    title = title[len("title:"):].strip()
 
-            year: int | None = None
-            if published_el is not None and published_el.text:
-                try:
-                    year = int(published_el.text[:4])
-                except ValueError:
-                    pass
+            if title_link:
+                arxiv_url = title_link.get("href", "").strip()
+                if "/abs/" in arxiv_url:
+                    arxiv_id = arxiv_url.split("/abs/")[-1].split("v")[0]
 
-            # Autores
-            authors = ", ".join(
-                (a.find("atom:name", NS).text or "").strip()
-                for a in entry.findall("atom:author", NS)
-                if a.find("atom:name", NS) is not None
-            )
+            if not arxiv_url:
+                abs_link = entry.select_one("p.list-title a[href*='/abs/']") or entry.select_one("a[href*='/abs/']")
+                if abs_link:
+                    arxiv_url = abs_link.get("href", "").strip()
+                    if "/abs/" in arxiv_url:
+                        arxiv_id = arxiv_url.split("/abs/")[-1].split("v")[0]
 
-            # DOI (puede estar en link con title="doi")
-            doi: str | None = None
-            for link in entry.findall("atom:link", NS):
-                if link.get("title") == "doi":
-                    href = link.get("href", "")
-                    doi = href.replace("https://doi.org/", "").replace("http://doi.org/", "") or None
+            if not title and title_link:
+                title = title_link.get_text(" ", strip=True)
 
             if not title:
                 continue
+
+            authors = ""
+            if authors_el:
+                authors = ", ".join(
+                    a.get_text(" ", strip=True)
+                    for a in authors_el.select("a")
+                    if a.get_text(strip=True)
+                )
+
+            abstract = ""
+            if abstract_el:
+                abstract = abstract_el.get_text(" ", strip=True)
+                if abstract.lower().startswith("abstract:"):
+                    abstract = abstract[len("abstract:"):].strip()
+
+            year: int | None = None
+            if meta_el:
+                meta_text = meta_el.get_text(" ", strip=True)
+                # Example: "Submitted 31 March, 2026; v1 submitted..."
+                for token in ("2026", "2025", "2024", "2023", "2022", "2021", "2020"):
+                    if token in meta_text:
+                        try:
+                            year = int(token)
+                            break
+                        except ValueError:
+                            pass
+
+            doi: str | None = None
+            doi_link = entry.select_one("a[href*='doi.org']")
+            if doi_link:
+                href = doi_link.get("href", "")
+                doi = href.replace("https://doi.org/", "").replace("http://doi.org/", "") or None
+
+            keywords = ""
+            keywords_el = entry.select_one("p.tags")
+            if keywords_el:
+                keywords = keywords_el.get_text(", ", strip=True)
 
             articles.append(
                 ArticleData(
@@ -122,6 +172,7 @@ class ArxivConnector(BaseSearchConnector):
                     url=arxiv_url,
                     source_db=self.SOURCE_DB,
                     source_id=arxiv_id,
+                    keywords=keywords,
                     language="en",
                 )
             )

@@ -130,7 +130,7 @@ export default function Home() {
             <div className="home__card-body">
               <h3 className="home__card-title">{nb.title}</h3>
               <p className="home__card-meta">
-                {nb.articles_count ?? 0} {(nb.articles_count ?? 0) === 1 ? t("article") : t("articles")}
+                {nb.articles_count ?? 0} {(nb.articles_count ?? 0) === 1 ? t("home_article_singular") : t("home_article_plural")}
                 {" · "}
                 {formatDate(nb.created_at)}
               </p>

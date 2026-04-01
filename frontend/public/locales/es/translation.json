@@ -48,10 +48,11 @@
     "reanalyze": "Reanalizar",
     "analyzing": "Analizando…",
     "analyzing_bg": "Análisis en curso… La página se actualizará automáticamente.",
+    "ai_processed_label": "Análisis completado — ver en panel central",
     "analyze_error": "Error al analizar: {{message}}",
     "more_options": "Más opciones",
-    "rename": "Cambiar nombre",
-    "delete": "Eliminar fuente",
+    "rename": "Renombrar artículo",
+    "delete": "Eliminar artículo",
     "confirm_delete": "¿Seguro que deseas eliminar este artículo? Esta acción no se puede deshacer."
   },
   "article_type": {
@@ -89,8 +90,8 @@
   "create_notebook": "Crear cuaderno",
   "notebook_title_placeholder": "Mi nuevo cuaderno…",
   "notebook_empty": "Este cuaderno está vacío. Inicia una búsqueda para agregar artículos.",
-  "article": "artículo",
-  "articles": "artículos",
+  "home_article_singular": "artículo",
+  "home_article_plural": "artículos",
   "confirm_delete": "¿Seguro que quieres eliminar este cuaderno? Esta acción no se puede deshacer.",
   "creating": "Creando…",
   "cancel": "Cancelar",
@@ -117,7 +118,13 @@
     "click_to_rename": "Doble clic para renombrar",
     "search_placeholder": "Buscar en arXiv, eLIBRARY, Scopus…",
     "drop_or_click": "Suelta archivos aquí o haz clic para seleccionar",
-    "drop_formats": "PDF, imágenes, documentos y audio, entre otros"
+    "drop_formats": "PDF, imágenes, documentos y audio, entre otros",
+    "studio": "Estudio",
+    "studio_desc": "Herramientas de análisis con IA",
+    "ai_tools": "Herramientas IA",
+    "select_to_analyze": "Selecciona un artículo para analizarlo",
+    "chat": "Chat",
+    "chat_placeholder": "Pregunta sobre este artículo…"
   },
   "common": {
     "loading": "Cargando…",
