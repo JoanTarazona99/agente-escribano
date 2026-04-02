@@ -7,7 +7,10 @@ env = environ.Env()
 
 DEBUG = False
 
-ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
+ALLOWED_HOSTS = env.list(
+    "DJANGO_ALLOWED_HOSTS",
+    default=["agente-escribano.onrender.com", ".onrender.com"],
+)
 
 # En producción usar PostgreSQL via DATABASE_URL
 # DATABASES ya está configurado en base.py leyendo DATABASE_URL
