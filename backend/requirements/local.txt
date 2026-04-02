@@ -1,5 +1,8 @@
 -r base.txt
 
+# ─── LLM (solo desarrollo local) ─────────────────────────
+ollama>=0.4,<1.0
+
 # ─── Testing ─────────────────────────────────────────────
 pytest>=8.3,<9.0
 pytest-django>=4.9,<5.0

@@ -26,13 +26,13 @@ class HealthView(APIView):
 
     @extend_schema(
         summary="Health check",
-        description="Verifica conectividad con Ollama, BD y devuelve estadísticas.",
+        description="Verifica conectividad con BD, LLM provider y devuelve estadísticas.",
         responses={200: dict},
     )
     def get(self, request: Request) -> Response:
         result: dict = {
             "database": {"ok": False},
-            "ollama": {"ok": False, "model": ""},
+            "llm": {"ok": False, "provider": "unknown"},
             "stats": {"total_articles": 0, "ai_processed": 0},
         }
 
@@ -46,20 +46,33 @@ class HealthView(APIView):
         except Exception as exc:
             result["database"]["error"] = str(exc)
 
-        # Ollama
-        try:
-            base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
-            model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
-            client = ollama.Client(host=base_url, timeout=10.0)
-            models = client.list()
-            model_names = [m.get("name", m.get("model", "")) for m in models.get("models", [])]
-            result["ollama"]["ok"] = True
-            result["ollama"]["model"] = model
-            result["ollama"]["available_models"] = model_names
-            result["ollama"]["model_loaded"] = model in model_names
-        except Exception as exc:
-            result["ollama"]["error"] = str(exc)
+        # LLM Provider (Ollama u OpenRouter según configuración)
+        provider = getattr(settings, "LLM_PROVIDER", "ollama")
+        result["llm"]["provider"] = provider
 
-        overall_ok = result["database"]["ok"] and result["ollama"]["ok"]
+        try:
+            if provider == "openrouter":
+                # Verificar OpenRouter API
+                api_key = getattr(settings, "OPENROUTER_API_KEY", "")
+                if not api_key:
+                    result["llm"]["error"] = "OPENROUTER_API_KEY not configured"
+                else:
+                    result["llm"]["ok"] = True
+                    result["llm"]["message"] = "OpenRouter API is ready"
+            else:
+                # Verificar Ollama (por defecto)
+                base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+                model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
+                client = ollama.Client(host=base_url, timeout=10.0)
+                models = client.list()
+                model_names = [m.get("name", m.get("model", "")) for m in models.get("models", [])]
+                result["llm"]["ok"] = True
+                result["llm"]["model"] = model
+                result["llm"]["available_models"] = model_names
+                result["llm"]["model_loaded"] = model in model_names
+        except Exception as exc:
+            result["llm"]["error"] = str(exc)
+
+        overall_ok = result["database"]["ok"] and result["llm"]["ok"]
         http_status = status.HTTP_200_OK if overall_ok else status.HTTP_503_SERVICE_UNAVAILABLE
         return Response(result, status=http_status)

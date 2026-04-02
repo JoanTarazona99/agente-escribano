@@ -1,8 +1,8 @@
 """
-Servicio de integración con Ollama para análisis, traducción y resumen de artículos.
+Servicio de integración con Ollama (local) o OpenRouter (producción).
 
 Uso:
-    service = OllamaService()
+    service = get_llm_service()  # Elige automáticamente según LLM_PROVIDER
     service.process_article(article)  # actualiza campos ai_* en el objeto
 
 Mocking en tests:
@@ -17,6 +17,12 @@ import os
 import ollama
 from django.conf import settings
 
+# Importar OpenRouterService (evita import circular si se necesita)
+try:
+    from .openrouter_service import OpenRouterService
+except ImportError:
+    OpenRouterService = None
+
 # ─── Bypass proxy del sistema para peticiones a Ollama (localhost) ────────────
 # httpx (usado internamente por ollama) detecta el proxy del registro de Windows
 # (p.ej. V2Ray/Clash en 127.0.0.1:10809) y enruta TODAS las peticiones HTTP a
@@ -27,6 +33,29 @@ from django.conf import settings
 os.environ["NO_PROXY"] = "localhost,127.0.0.1,0.0.0.0"
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Factory pattern: selecciona el servicio LLM según configuración ──────────
+def get_llm_service():
+    """
+    Retorna la instancia del servicio LLM según LLM_PROVIDER en settings.
+
+    Valores permitidos:
+    - 'openrouter': Usa OpenRouter API (producción, Render gratuito)
+    - 'ollama': Usa Ollama local (desarrollo, completamente gratis)
+
+    En .env.dev (desarrollo):  LLM_PROVIDER=ollama
+    En .env (Render):          LLM_PROVIDER=openrouter
+    """
+    provider = getattr(settings, "LLM_PROVIDER", "ollama")
+
+    if provider == "openrouter" and OpenRouterService:
+        logger.info("🌐 Usando OpenRouter como provedor LLM")
+        return OpenRouterService()
+    else:
+        logger.info("🦙 Usando Ollama como provedor LLM")
+        return OllamaService()
+
 
 # ─── Templates de prompts ─────────────────────────────────────────────────────
 

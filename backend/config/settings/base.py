@@ -151,8 +151,16 @@ CORS_ALLOWED_ORIGINS = env.list(
 
 
 # ─── Ollama / LLM ────────────────────────────────────────
+# Proveedor de LLM a usar: 'ollama' (desarrollo local) o 'openrouter' (producción Render)
+LLM_PROVIDER = env("LLM_PROVIDER", default="ollama")
+
+# Configuración de Ollama (desarrollo local)
 OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
+
+# Configuración de OpenRouter (producción Render)
+# Obtén tu API key en: https://openrouter.ai/workspaces/default/keys
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
 
 
 # ─── APIs académicas ─────────────────────────────────────

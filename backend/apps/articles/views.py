@@ -100,12 +100,12 @@ class ArticleViewSet(
     @action(detail=True, methods=["post"], url_path="analyze")
     def analyze(self, request: Request, pk: int = None) -> Response:
         """Ejecuta el análisis IA de forma síncrona y devuelve el artículo procesado."""
-        from apps.agent.services import OllamaService
+        from apps.agent.services import get_llm_service
 
         article = self.get_object()
 
         try:
-            service = OllamaService()
+            service = get_llm_service()  # Usa factory para seleccionar Ollama u OpenRouter
             service.process_article(article)
             article.refresh_from_db()
         except Exception as exc:

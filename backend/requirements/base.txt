@@ -6,9 +6,6 @@ django-environ>=0.12,<1.0
 django-filter>=24.3,<25.0
 drf-spectacular>=0.28,<1.0
 
-# ─── LLM ─────────────────────────────────────────────────
-ollama>=0.4,<1.0
-
 # ─── HTTP / scraping ─────────────────────────────────────
 httpx>=0.28,<1.0
 curl-cffi

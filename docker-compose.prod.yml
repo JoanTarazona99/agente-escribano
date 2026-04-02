@@ -1,17 +1,29 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        ENV: production  # Usa requirements/production.txt (sin Ollama)
+    ports:
+      - "8000:8000"
     expose:
       - "8000"
     env_file:
       - .env.prod
     environment:
       - DJANGO_SETTINGS_MODULE=config.settings.production
-    depends_on:
-      - ollama
-    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4
+      - DATABASE_URL=${DATABASE_URL}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # En Render: no dependencies (PostgreSQL se configura vía DATABASE_URL)
 
   frontend:
     build:
@@ -31,14 +43,5 @@ services:
       - backend
       - frontend
 
-  ollama:
-    image: ollama/ollama:latest
-    expose:
-      - "11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-
-volumes:
-  ollama_data:
+# NOTA: Ollama OMITIDO en producción
+# Usar OpenRouter API en su lugar (LLM_PROVIDER=openrouter)
