@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import os
 
-import ollama
 from django.conf import settings
 
 # Importar OpenRouterService (evita import circular si se necesita)
@@ -122,6 +121,11 @@ class OllamaService:
     """
 
     def __init__(self) -> None:
+        try:
+            import ollama
+        except ImportError:
+            raise ImportError("ollama is not installed. Set LLM_PROVIDER=openrouter for production.")
+        
         base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
         self.model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
         self.client = ollama.Client(host=base_url, timeout=120.0)
