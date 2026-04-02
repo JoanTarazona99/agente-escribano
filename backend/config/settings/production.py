@@ -26,3 +26,9 @@ SECURE_HSTS_PRELOAD = True
 # Archivos estáticos con WhiteNoise
 MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")  # noqa: F405
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# CORS: permitir todos los orígenes (API pública sin autenticación).
+# El frontend usa un proxy de Render (_redirects) pero el navegador
+# aún envía preflights con Origin; esto garantiza que siempre se
+# devuelva Access-Control-Allow-Origin.
+CORS_ALLOW_ALL_ORIGINS = True
