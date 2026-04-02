@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 
-import ollama
 from django.conf import settings
 from django.db import connection
 from drf_spectacular.utils import extend_schema
@@ -60,16 +59,22 @@ class HealthView(APIView):
                     result["llm"]["ok"] = True
                     result["llm"]["message"] = "OpenRouter API is ready"
             else:
-                # Verificar Ollama (por defecto)
-                base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
-                model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
-                client = ollama.Client(host=base_url, timeout=10.0)
-                models = client.list()
-                model_names = [m.get("name", m.get("model", "")) for m in models.get("models", [])]
-                result["llm"]["ok"] = True
-                result["llm"]["model"] = model
-                result["llm"]["available_models"] = model_names
-                result["llm"]["model_loaded"] = model in model_names
+                # Verificar Ollama (por defecto) — lazy import
+                try:
+                    import ollama
+                    base_url = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+                    model = getattr(settings, "OLLAMA_MODEL", "llama3.2")
+                    client = ollama.Client(host=base_url, timeout=10.0)
+                    models = client.list()
+                    model_names = [m.get("name", m.get("model", "")) for m in models.get("models", [])]
+                    result["llm"]["ok"] = True
+                    result["llm"]["model"] = model
+                    result["llm"]["available_models"] = model_names
+                    result["llm"]["model_loaded"] = model in model_names
+                except ImportError:
+                    result["llm"]["error"] = "ollama not installed (production mode)"
+                except Exception as exc:
+                    result["llm"]["error"] = str(exc)
         except Exception as exc:
             result["llm"]["error"] = str(exc)
 
