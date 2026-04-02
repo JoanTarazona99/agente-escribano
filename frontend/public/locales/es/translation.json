@@ -129,6 +129,9 @@
   "common": {
     "loading": "Cargando…",
     "not_found": "No encontrado",
-    "back": "Volver"
+    "back": "Volver",
+    "api_error": "No se pudo conectar con el servidor. Puede estar iniciándose (tarda ~30 s en plan gratuito de Render).",
+    "unknown_error": "Error desconocido",
+    "retry": "Reintentar"
   }
 }

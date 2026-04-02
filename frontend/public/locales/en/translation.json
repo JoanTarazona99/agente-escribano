@@ -129,6 +129,9 @@
   "common": {
     "loading": "Loading…",
     "not_found": "Not found",
-    "back": "Back"
+    "back": "Back",
+    "api_error": "Could not connect to the server. It may be starting up (~30 s on Render free tier).",
+    "unknown_error": "Unknown error",
+    "retry": "Retry"
   }
 }

@@ -15,9 +15,26 @@ import type {
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  timeout: 30_000, // 30s para tolerar cold-start de Render free tier
   headers: {
     "Content-Type": "application/json",
   },
+});
+
+/** Retry automático: reintenta 1 vez en errores de red/timeout (cold-start). */
+api.interceptors.response.use(undefined, async (error) => {
+  const config = error.config;
+  if (
+    config &&
+    !config.__retried &&
+    (!error.response || error.code === "ECONNABORTED" || error.code === "ERR_NETWORK")
+  ) {
+    config.__retried = true;
+    // Espera 2s antes de reintentar (tiempo para que Render despierte el servicio)
+    await new Promise((r) => setTimeout(r, 2000));
+    return api.request(config);
+  }
+  return Promise.reject(error);
 });
 
 /** Lanza una búsqueda asíncrona y devuelve el SearchJob creado. */

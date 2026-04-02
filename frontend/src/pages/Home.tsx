@@ -11,9 +11,11 @@ export default function Home() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["notebooks"],
     queryFn: getNotebooks,
+    retry: 2,
+    retryDelay: 3000,
   });
 
   const [showCreate, setShowCreate] = useState(false);
@@ -153,7 +155,24 @@ export default function Home() {
         <div className="home__loading">{t("common.loading")}</div>
       )}
 
-      {!isLoading && notebooks.length === 0 && (
+      {isError && (
+        <div className="home__error">
+          <div className="home__empty-icon">⚠️</div>
+          <p className="home__empty-text">{t("common.api_error")}</p>
+          <p style={{ fontSize: "0.85rem", color: "#999", marginTop: 4 }}>
+            {(error as Error)?.message || t("common.unknown_error")}
+          </p>
+          <button
+            className="home__card-create-confirm"
+            style={{ marginTop: 12 }}
+            onClick={() => refetch()}
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !isError && notebooks.length === 0 && (
         <div className="home__empty">
           <div className="home__empty-icon">📚</div>
           <p className="home__empty-text">{t("home.empty")}</p>
