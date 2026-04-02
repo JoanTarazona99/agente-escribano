@@ -155,6 +155,27 @@ CORS_ALLOWED_ORIGINS = env.list(
         "https://agente-escribano-site.onrender.com",
     ],
 )
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+# Permitir que el navegador cachee la respuesta preflight 1h
+CORS_PREFLIGHT_MAX_AGE = 3600
 
 
 # ─── Ollama / LLM ────────────────────────────────────────
