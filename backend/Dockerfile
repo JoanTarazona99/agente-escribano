@@ -1,28 +1,30 @@
-# Python 3.13 compatible — multi-stage build
-# Para desarrollo local: docker build -t agente-escribano:dev .
-# Para producción Render: docker build --build-arg ENV=production -t agente-escribano:prod .
+# Python 3.13 compatible para producción en Render
+# Para desarrollo local: usar docker-compose.yml que incluye Ollama
+# Para producción Render: usa requirements/production.txt sin Ollama
 
 FROM python:3.13-slim
 
-ARG ENV=local
-
 # Dependencias del sistema
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libffi-dev \
     postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Instalar dependencias Python según el entorno
-COPY requirements/base.txt requirements/base.txt
-COPY requirements/${ENV}.txt requirements/${ENV}.txt
-RUN pip install --upgrade pip && pip install -r requirements/${ENV}.txt
+# Copiar y instalar SOLO requirements/production.txt (sin Ollama para ahorrar RAM)
+COPY backend/requirements/base.txt requirements/base.txt
+COPY backend/requirements/production.txt requirements/production.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements/production.txt
 
 # Copiar código fuente
-COPY . .
+COPY backend/ .
 
+# Exponemos puerto 8000
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60"]
+# Ejecuta migraciones + inicia Gunicorn
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60 --access-logfile - --error-logfile -"]
