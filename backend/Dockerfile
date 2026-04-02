@@ -24,7 +24,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY backend/ .
 
 # Exponemos puerto 8000
+# Variables de entorno por defecto para producción
+ENV DJANGO_SETTINGS_MODULE=config.settings.production
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
-# Ejecuta migraciones + inicia Gunicorn
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60 --access-logfile - --error-logfile -"]
+# Collect static files + migraciones + Gunicorn
+CMD ["sh", "-c", "python manage.py collectstatic --noinput && python manage.py migrate --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60 --access-logfile - --error-logfile -"]

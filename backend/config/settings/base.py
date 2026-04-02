@@ -16,7 +16,10 @@ env = environ.Env(
 )
 
 # Leer .env en la raíz del proyecto (un nivel arriba de backend/)
-environ.Env.read_env(BASE_DIR.parent / ".env.dev")
+# En producción (Docker/Render) el archivo no existe — las vars vienen del entorno
+_env_file = BASE_DIR.parent / ".env.dev"
+if _env_file.is_file():
+    environ.Env.read_env(_env_file)
 
 
 # ─── Seguridad ────────────────────────────────────────────
