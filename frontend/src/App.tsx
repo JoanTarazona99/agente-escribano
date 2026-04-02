@@ -1,4 +1,3 @@
-import React from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import ErrorBoundary from "@/components/ErrorBoundary/ErrorBoundary";
 import Navbar from "@/components/Navbar/Navbar";

@@ -1,4 +1,3 @@
-import React from "react";
 import { useTranslation } from "react-i18next";
 import type { SearchJob } from "@/types";
 import "./ProgressIndicator.css";
