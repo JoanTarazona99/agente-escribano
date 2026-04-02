@@ -14,7 +14,7 @@ export default function Home() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["notebooks"],
     queryFn: getNotebooks,
-    retry: 2,
+    retry: 1,
     retryDelay: 3000,
   });
 
@@ -28,6 +28,7 @@ export default function Home() {
 
   const createMutation = useMutation({
     mutationFn: (title: string) => createNotebook(title),
+    retry: false,
     onSuccess: (nb) => {
       queryClient.invalidateQueries({ queryKey: ["notebooks"] });
       navigate(`/notebooks/${nb.id}`);

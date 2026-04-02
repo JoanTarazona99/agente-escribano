@@ -15,6 +15,7 @@ export const NotebookButton = ({ onNotebookCreated }: NotebookButtonProps) => {
 
   const createMutation = useMutation({
     mutationFn: (title?: string) => createNotebook(title),
+    retry: false,
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["notebooks"] });
       if (onNotebookCreated) {
