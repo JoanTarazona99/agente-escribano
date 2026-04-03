@@ -167,7 +167,7 @@ export default function Notebook() {
   });
 
   const analyzeMutation = useMutation({
-    mutationFn: (force = false) => analyzeArticle(selectedArticleId!, force),
+    mutationFn: (force: boolean) => analyzeArticle(selectedArticleId!, force),
     onSuccess: (data) => {
       queryClient.setQueryData(["article", String(selectedArticleId)], data);
     },
