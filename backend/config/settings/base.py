@@ -189,8 +189,8 @@ OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
 # Configuración de OpenRouter (producción Render)
 # Obtén tu API key en: https://openrouter.ai/workspaces/default/keys
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
-# Modelo de OpenRouter:  openrouter/auto | meta-llama/llama-3.1-8b-instruct:free | ...
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="meta-llama/llama-3.1-8b-instruct:free")
+# Modelo de OpenRouter:  openrouter/auto | meta-llama/llama-3.3-70b-instruct:free | ...
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="meta-llama/llama-3.3-70b-instruct:free")
 
 
 # ─── APIs académicas ─────────────────────────────────────

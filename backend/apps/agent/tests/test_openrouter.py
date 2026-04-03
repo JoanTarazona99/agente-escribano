@@ -14,7 +14,7 @@ def _openrouter_response(content: str) -> dict:
     """Simula la estructura de respuesta de OpenRouter API."""
     return {
         "choices": [{"message": {"content": content}}],
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "meta-llama/llama-3.3-70b-instruct:free",
     }
 
 
@@ -78,6 +78,36 @@ class TestCallOpenRouter:
 
             result = service._call_openrouter("test prompt")
             assert result is None
+
+    def test_raises_on_4xx_model_not_found(self):
+        """Errores 4xx (excepto 429) ahora se propagan como RuntimeError."""
+        service = _make_service()
+        error_resp = _make_httpx_response(
+            {"error": {"message": "No endpoints found for model"}}, status_code=404,
+        )
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.return_value = error_resp
+
+            with pytest.raises(RuntimeError, match="OpenRouter error 404"):
+                service._call_openrouter("test prompt")
+
+    def test_raises_on_401_invalid_key(self):
+        """401 se propaga como RuntimeError."""
+        service = _make_service()
+        error_resp = _make_httpx_response(
+            {"error": {"message": "Invalid credentials"}}, status_code=401,
+        )
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.return_value = error_resp
+
+            with pytest.raises(RuntimeError, match="OpenRouter error 401"):
+                service._call_openrouter("test prompt")
 
     def test_returns_none_when_no_choices(self):
         service = _make_service()
@@ -309,6 +339,27 @@ class TestProcessArticle:
         # Partial save: translations saved, but no summary/analysis
         assert article.title_es == "Titulo"
         assert article.ai_processed is False
+
+    def test_raises_when_no_content_generated(self):
+        """Si todas las llamadas retornan None/vacio, NO marca ai_processed."""
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test", abstract_original="Abstract", language_original="en",
+        )
+
+        service = _make_service()
+
+        # All batch calls return None (e.g. model unavailable, 429, timeouts)
+        with patch.object(service, "_call_openrouter_json", return_value=None):
+            with patch.object(service, "_translate", return_value=""):
+                with patch.object(service, "_call_openrouter", return_value=None):
+                    with pytest.raises(RuntimeError, match="no genero contenido"):
+                        service.process_article(article)
+
+        article.refresh_from_db()
+        assert article.ai_processed is False
+        assert article.ai_summary == ""
 
     def test_skips_existing_fields(self):
         from apps.articles.models import Article

@@ -41,7 +41,7 @@ class OpenRouterService:
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        self.model = getattr(settings, "OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+        self.model = getattr(settings, "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
         self.timeout = 120.0  # 2 minutos
 
     # ================================================================
@@ -134,11 +134,25 @@ class OpenRouterService:
                         setattr(article, key, val)
                         result[key] = val
 
+            if not result:
+                logger.error(
+                    "Articulo %s: OpenRouter no genero contenido. "
+                    "Modelo: %s. Verifica OPENROUTER_API_KEY y que el "
+                    "modelo exista en https://openrouter.ai/models",
+                    article.id, self.model,
+                )
+                raise RuntimeError(
+                    f"OpenRouter no genero contenido para articulo {article.id}. "
+                    f"El modelo '{self.model}' puede no estar disponible. "
+                    f"Consulta https://openrouter.ai/models"
+                )
+
             article.ai_processed = True
             article.save(update_fields=_AI_UPDATE_FIELDS)
             logger.info(
-                "Articulo %s procesado con OpenRouter (modelo: %s)",
-                article.id, self.model,
+                "Articulo %s procesado con OpenRouter (modelo: %s, "
+                "campos: %s)",
+                article.id, self.model, list(result.keys()),
             )
             return result
 
@@ -147,7 +161,12 @@ class OpenRouterService:
                 "Error fatal procesando articulo %s con OpenRouter: %s",
                 article.id, e,
             )
-            article.save()
+            # Guardar progreso parcial (p.ej. traducciones ya obtenidas),
+            # pero NO marcar ai_processed = True.
+            try:
+                article.save()
+            except Exception:
+                pass
             raise
 
     # ================================================================
@@ -399,16 +418,21 @@ class OpenRouterService:
             return content.strip()
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                "OpenRouter HTTP %d: %s",
-                e.response.status_code,
-                e.response.text[:500],
-            )
+            code = e.response.status_code
+            body = e.response.text[:500]
+            logger.error("OpenRouter HTTP %d: %s", code, body)
+            # Errores 4xx (excepto 429) son fatales: API key invalida,
+            # modelo inexistente, etc. Propagarlos para que el usuario
+            # vea un mensaje claro en vez de campos vacios silenciosos.
+            if 400 <= code < 500 and code != 429:
+                raise RuntimeError(
+                    f"OpenRouter error {code}: {body[:200]}"
+                ) from e
             return None
         except httpx.TimeoutException:
             logger.error("OpenRouter timeout (>%ds)", self.timeout)
             return None
         except Exception as e:
             logger.error("OpenRouter error: %s", str(e)[:500])
-            return None
+            raise
 
