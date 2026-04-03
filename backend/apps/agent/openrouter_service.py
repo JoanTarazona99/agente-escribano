@@ -70,15 +70,14 @@ _AI_UPDATE_FIELDS = [
 ]
 
 # Modelos gratuitos de fallback, ordenados por preferencia.
-# Si el principal da 429, se prueban estos. Proveedores diversos para
-# maximizar disponibilidad cuando uno aplica rate-limit global.
-# Duplicados con self.model se filtran automaticamente.
+# Whitelist estricta: solo slugs :free verificados en OpenRouter.
+# Si el principal da 429/404, se prueban estos. Duplicados con
+# self.model se filtran automaticamente.
 _FALLBACK_MODELS = [
+    "qwen/qwen3.6-plus-preview:free",
     "google/gemma-3-27b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3-8b:free",
-    "deepseek/deepseek-r1-0528:free",
-    "microsoft/phi-4-reasoning-plus:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
@@ -103,7 +102,7 @@ class OpenRouterService:
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        self.model = getattr(settings, "OPENROUTER_MODEL", "google/gemma-3-12b-it:free")
+        self.model = getattr(settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free")
         self.timeout = 30.0  # Per-request HTTP timeout
 
     # ================================================================
@@ -555,9 +554,18 @@ class OpenRouterService:
                         ) from e
                     # 404 modelo no encontrado
                     if code == 404:
-                        raise ModelNotFoundError(
-                            f"Modelo no encontrado ({model}): {body[:200]}"
-                        ) from e
+                        if model == self.model:
+                            # Fatal solo si es el modelo principal
+                            raise ModelNotFoundError(
+                                f"Modelo no encontrado ({model}): {body[:200]}"
+                            ) from e
+                        # Fallback 404 -> saltar al siguiente
+                        logger.warning(
+                            "Fallback %s no encontrado (404), probando siguiente...",
+                            model,
+                        )
+                        all_rate_limited = False
+                        break
                     # Otros 4xx son fatales
                     if 400 <= code < 500:
                         raise OpenRouterError(

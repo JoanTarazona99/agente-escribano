@@ -135,7 +135,7 @@ class TestCallOpenRouter:
             assert result == "Fallback"
 
     def test_raises_on_4xx_model_not_found(self):
-        """404 se propaga como ModelNotFoundError."""
+        """404 en modelo principal se propaga como ModelNotFoundError."""
         service = _make_service()
         error_resp = _make_httpx_response(
             {"error": {"message": "No endpoints found for model"}}, status_code=404,
@@ -148,6 +148,35 @@ class TestCallOpenRouter:
 
             with pytest.raises(ModelNotFoundError):
                 service._call_openrouter("test prompt")
+
+    @patch("apps.agent.openrouter_service.time.monotonic")
+    def test_404_on_fallback_skips_to_next(self, mock_monotonic):
+        """404 en fallback no es fatal: salta al siguiente modelo."""
+        service = _make_service()
+        mock_monotonic.return_value = 0.0
+        error_429 = _make_httpx_response({"error": "rate limited"}, status_code=429)
+        error_404 = _make_httpx_response(
+            {"error": {"message": "No endpoints found"}}, status_code=404,
+        )
+        ok_resp = _make_httpx_response(_openrouter_response("OK from later fallback"))
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:  # principal: 3 intentos -> 429
+                return error_429
+            if call_count == 4:  # primer fallback: 404
+                return error_404
+            return ok_resp  # segundo fallback: OK
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.side_effect = side_effect
+            with patch("apps.agent.openrouter_service.time.sleep"):
+                result = service._call_openrouter("test prompt")
+                assert result == "OK from later fallback"
 
     def test_raises_on_401_invalid_key(self):
         """401 se propaga como AuthError."""
