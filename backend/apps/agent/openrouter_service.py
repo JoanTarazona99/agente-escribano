@@ -31,18 +31,19 @@ _AI_UPDATE_FIELDS = [
 ]
 
 # Modelos gratuitos de fallback, ordenados por preferencia.
-# Si el modelo principal da 429 repetidamente, se prueban estos.
+# Si el modelo principal da 429, se prueban estos (maximo 2 para no exceder timeout).
 _FALLBACK_MODELS = [
     "google/gemma-3-12b-it:free",
     "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
-_MAX_RETRIES_PER_MODEL = 2
-# Espera base entre reintentos (en segundos). Se multiplica por intento.
-_RETRY_BASE_DELAY = 3.0
+_MAX_RETRIES_PER_MODEL = 1
+# Espera entre reintentos (en segundos).
+_RETRY_DELAY = 2.0
+# Tiempo maximo total para _call_openrouter (segundos).
+# Debe ser < Gunicorn timeout (120s) / num_calls (3-6) para que quepa.
+_CALL_DEADLINE = 20.0
 
 
 class OpenRouterService:
@@ -58,7 +59,7 @@ class OpenRouterService:
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
         self.model = getattr(settings, "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
-        self.timeout = 120.0  # 2 minutos
+        self.timeout = 30.0  # 30 segundos por llamada HTTP individual
 
     # ================================================================
     # Punto de entrada principal
@@ -392,9 +393,9 @@ class OpenRouterService:
         Llamada generica a OpenRouter API con retry y fallback de modelos.
 
         Estrategia:
-        1. Intenta con self.model (hasta _MAX_RETRIES_PER_MODEL en 429).
-        2. Si agota reintentos, prueba cada modelo en _FALLBACK_MODELS.
-        3. Si todos fallan, retorna None.
+        1. Intenta con self.model (1 retry en 429).
+        2. Si falla, prueba cada modelo en _FALLBACK_MODELS.
+        3. Respeta _CALL_DEADLINE total para no exceder Gunicorn timeout.
         """
         models_to_try = [self.model] + [
             m for m in _FALLBACK_MODELS if m != self.model
@@ -407,8 +408,19 @@ class OpenRouterService:
             "Content-Type": "application/json",
         }
 
+        deadline = time.monotonic() + _CALL_DEADLINE
+
         for model in models_to_try:
-            for attempt in range(_MAX_RETRIES_PER_MODEL):
+            for attempt in range(_MAX_RETRIES_PER_MODEL + 1):
+                # Abortar si se paso el deadline global
+                remaining = deadline - time.monotonic()
+                if remaining <= 2:
+                    logger.warning(
+                        "Deadline alcanzado (%.0fs). Abortando.",
+                        _CALL_DEADLINE,
+                    )
+                    return None
+
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
@@ -418,7 +430,9 @@ class OpenRouterService:
                 }
 
                 try:
-                    with httpx.Client(timeout=self.timeout) as client:
+                    with httpx.Client(
+                        timeout=min(self.timeout, remaining),
+                    ) as client:
                         logger.debug(
                             "OpenRouter %s (intento %d), max_tokens=%d",
                             model, attempt + 1, max_tokens,
@@ -466,15 +480,17 @@ class OpenRouterService:
                         "OpenRouter HTTP %d (%s, intento %d): %s",
                         code, model, attempt + 1, body[:200],
                     )
-                    # 429 = rate limit -> reintentar con backoff
-                    if code == 429:
-                        delay = _RETRY_BASE_DELAY * (attempt + 1)
+                    # 429 = rate limit -> reintentar con delay corto
+                    if code == 429 and attempt < _MAX_RETRIES_PER_MODEL:
                         logger.info(
-                            "Rate-limited en %s, espera %.1fs...",
-                            model, delay,
+                            "Rate-limited en %s, espera %.0fs...",
+                            model, _RETRY_DELAY,
                         )
-                        time.sleep(delay)
+                        time.sleep(_RETRY_DELAY)
                         continue
+                    # 429 agotado retries -> probar siguiente modelo
+                    if code == 429:
+                        break
                     # Otros 4xx (401, 403, 404) son fatales
                     if 400 <= code < 500:
                         raise RuntimeError(
@@ -484,8 +500,8 @@ class OpenRouterService:
                     break
 
                 except httpx.TimeoutException:
-                    logger.error(
-                        "OpenRouter timeout (>%ds) con %s",
+                    logger.warning(
+                        "OpenRouter timeout (>%.0fs) con %s",
                         self.timeout, model,
                     )
                     break  # Probar siguiente modelo
@@ -496,14 +512,14 @@ class OpenRouterService:
                     )
                     raise
 
-            # Agotados reintentos para este modelo, probar siguiente
+            # Agotados reintentos para este modelo
             logger.info(
-                "Modelo %s agotado, probando siguiente fallback...", model,
+                "Modelo %s no disponible, probando siguiente...", model,
             )
 
         logger.error(
-            "Todos los modelos agotados (principal: %s, fallbacks: %s)",
-            self.model, [m for m in models_to_try[1:]],
+            "Todos los modelos agotados (%.0fs). Principal: %s",
+            _CALL_DEADLINE, self.model,
         )
         return None
 

@@ -56,22 +56,26 @@ class TestCallOpenRouter:
             result = service._call_openrouter("test prompt")
             assert result == "Hello world"
 
+    @patch("apps.agent.openrouter_service.time.monotonic")
     @patch("apps.agent.openrouter_service.time.sleep")
-    def test_retries_on_429_then_falls_back(self, mock_sleep):
-        """429 agota reintentos en modelo principal, luego fallback funciona."""
+    def test_retries_on_429_then_falls_back(self, mock_sleep, mock_monotonic):
+        """429 agota retry en modelo principal, luego fallback funciona."""
         service = _make_service()
         error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
         ok_resp = _make_httpx_response(_openrouter_response("Fallback OK"))
+
+        # Simular que siempre queda tiempo (deadline lejano)
+        mock_monotonic.return_value = 0.0
 
         call_count = 0
 
         def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            # Primeras 2 llamadas (test-model): 429
+            # Intentos 1-2 (test-model: original + 1 retry): 429
             if call_count <= 2:
                 return error_resp
-            # Tercer intento (primer fallback): exito
+            # Intento 3 (primer fallback): exito
             return ok_resp
 
         with patch("httpx.Client") as MockClient:
@@ -81,13 +85,15 @@ class TestCallOpenRouter:
 
             result = service._call_openrouter("test prompt")
             assert result == "Fallback OK"
-            assert mock_sleep.call_count == 2  # 2 retries con sleep
+            assert mock_sleep.call_count == 1  # 1 retry con sleep
 
+    @patch("apps.agent.openrouter_service.time.monotonic")
     @patch("apps.agent.openrouter_service.time.sleep")
-    def test_returns_none_when_all_models_exhausted(self, mock_sleep):
+    def test_returns_none_when_all_models_exhausted(self, mock_sleep, mock_monotonic):
         """Si todos los modelos dan 429, retorna None."""
         service = _make_service()
         error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
+        mock_monotonic.return_value = 0.0
 
         with patch("httpx.Client") as MockClient:
             MockClient.return_value.__enter__ = lambda s: s
@@ -97,10 +103,12 @@ class TestCallOpenRouter:
             result = service._call_openrouter("test prompt")
             assert result is None
 
-    def test_returns_none_on_timeout_tries_next_model(self):
+    @patch("apps.agent.openrouter_service.time.monotonic")
+    def test_returns_none_on_timeout_tries_next_model(self, mock_monotonic):
         """Timeout en modelo principal, fallback funciona."""
         service = _make_service()
         ok_resp = _make_httpx_response(_openrouter_response("Fallback"))
+        mock_monotonic.return_value = 0.0
         call_count = 0
 
         def side_effect(*args, **kwargs):
