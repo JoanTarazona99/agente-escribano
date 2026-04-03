@@ -102,6 +102,12 @@ class SearchOrchestrator:
                 results[source] = 0
                 continue
 
+            if not articles_data:
+                logger.warning(
+                    "Fuente %s: 0 artículos encontrados para query=%r (posible error transitorio).",
+                    source, query,
+                )
+
             saved_instances, count = self._save_articles(articles_data)
             all_articles.extend(saved_instances)
             results[source] = count

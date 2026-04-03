@@ -11,45 +11,41 @@ from apps.search.connectors.scopus import ScopusConnector
 from apps.search.connectors.stubs import WOSConnector
 
 
-ARXIV_SAMPLE_RESPONSE = """
-<html>
-    <body>
-        <ol class="breathe-horizontal">
-            <li class="arxiv-result">
-                <p class="title is-5 mathjax">
-                    <a href="https://arxiv.org/abs/2301.00001v1">Water Dissociation in Bipolar Membranes</a>
-                </p>
-                <p class="authors">
-                    <a href="/search/?searchtype=author&amp;query=Ivanov%2C+A.B.">Ivanov, A.B.</a>,
-                    <a href="/search/?searchtype=author&amp;query=Petrov%2C+C.D.">Petrov, C.D.</a>
-                </p>
-                <p class="is-size-7">Submitted 15 January, 2023; originally announced January 2023.</p>
-                <span class="abstract-full has-text-grey-dark mathjax">
-                    Abstract: This study investigates water dissociation phenomena in bipolar ion-exchange membranes under electric field conditions.
-                </span>
-                <a href="https://doi.org/10.1234/example.doi">doi</a>
-            </li>
-            <li class="arxiv-result">
-                <p class="title is-5 mathjax">
-                    <a href="https://arxiv.org/abs/2302.00002v1">Recombination Kinetics in Ion-Exchange Systems</a>
-                </p>
-                <p class="authors">
-                    <a href="/search/?searchtype=author&amp;query=Sidorov%2C+E.F.">Sidorov, E.F.</a>
-                </p>
-                <p class="is-size-7">Submitted 20 February, 2023; originally announced February 2023.</p>
-                <span class="abstract-full has-text-grey-dark mathjax">
-                    Abstract: A theoretical model for water recombination in electromembrane systems.
-                </span>
-            </li>
-        </ol>
-    </body>
-</html>
+ARXIV_SAMPLE_ATOM = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">2</totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/2301.00001v1</id>
+    <title>Water Dissociation in Bipolar Membranes</title>
+    <summary>This study investigates water dissociation phenomena in bipolar ion-exchange membranes under electric field conditions.</summary>
+    <published>2023-01-15T00:00:00Z</published>
+    <author><name>Ivanov, A.B.</name></author>
+    <author><name>Petrov, C.D.</name></author>
+    <link href="https://arxiv.org/abs/2301.00001v1" rel="alternate" type="text/html"/>
+    <arxiv:doi>10.1234/example.doi</arxiv:doi>
+    <category term="physics.chem-ph"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2302.00002v1</id>
+    <title>Recombination Kinetics in Ion-Exchange Systems</title>
+    <summary>A theoretical model for water recombination in electromembrane systems.</summary>
+    <published>2023-02-20T00:00:00Z</published>
+    <author><name>Sidorov, E.F.</name></author>
+    <link href="https://arxiv.org/abs/2302.00002v1" rel="alternate" type="text/html"/>
+    <category term="physics.chem-ph"/>
+  </entry>
+</feed>
 """
 
 
 class TestArxivConnector:
-    @patch.object(ArxivConnector, "_fetch_html", return_value=ARXIV_SAMPLE_RESPONSE)
-    def test_search_returns_articles(self, mock_fetch_html):
+    @respx.mock
+    def test_search_returns_articles(self):
+        respx.get("https://export.arxiv.org/api/query").mock(
+            return_value=httpx.Response(200, text=ARXIV_SAMPLE_ATOM)
+        )
         connector = ArxivConnector()
         results = connector.search("water dissociation electromembrane")
         assert len(results) == 2
@@ -59,17 +55,51 @@ class TestArxivConnector:
         assert results[0].source_db == "arxiv"
         assert "Ivanov" in results[0].authors
 
-    @patch.object(ArxivConnector, "_fetch_html", return_value="")
-    def test_search_returns_empty_on_http_error(self, mock_fetch_html):
+    @respx.mock
+    def test_search_returns_empty_on_http_error(self):
+        respx.get("https://export.arxiv.org/api/query").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
         connector = ArxivConnector()
         results = connector.search("test")
         assert results == []
 
-    @patch.object(ArxivConnector, "_fetch_html", return_value=ARXIV_SAMPLE_RESPONSE)
-    def test_source_db_is_arxiv(self, mock_fetch_html):
+    @respx.mock
+    def test_source_db_is_arxiv(self):
+        respx.get("https://export.arxiv.org/api/query").mock(
+            return_value=httpx.Response(200, text=ARXIV_SAMPLE_ATOM)
+        )
         connector = ArxivConnector()
         results = connector.search("test")
         assert all(r.source_db == "arxiv" for r in results)
+
+    def test_is_available_always_true(self):
+        assert ArxivConnector().is_available() is True
+
+    @respx.mock
+    def test_retries_on_timeout(self):
+        """Connector retries after timeout and succeeds on next attempt."""
+        route = respx.get("https://export.arxiv.org/api/query")
+        route.side_effect = [
+            httpx.TimeoutException("connect timeout"),
+            httpx.Response(200, text=ARXIV_SAMPLE_ATOM),
+        ]
+        connector = ArxivConnector()
+        results = connector.search("test")
+        assert len(results) == 2
+        assert route.call_count == 2
+
+    @respx.mock
+    def test_retries_on_429(self):
+        """Connector retries after 429 rate limit."""
+        route = respx.get("https://export.arxiv.org/api/query")
+        route.side_effect = [
+            httpx.Response(429, text="Too Many Requests"),
+            httpx.Response(200, text=ARXIV_SAMPLE_ATOM),
+        ]
+        connector = ArxivConnector()
+        results = connector.search("test")
+        assert len(results) == 2
 
     def test_is_available_always_true(self):
         assert ArxivConnector().is_available() is True

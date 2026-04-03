@@ -50,26 +50,43 @@ class ArxivConnector(BaseSearchConnector):
         from django.conf import settings
         proxy = getattr(settings, "HTTP_PROXY", "") or None
 
+        # Timeout separado: connect corto (evita bloqueos en cold-start), read largo
+        timeout = httpx.Timeout(connect=15.0, read=45.0, write=10.0, pool=10.0)
         retries = 3
+        last_error: str = ""
         for attempt in range(retries):
             try:
-                with httpx.Client(timeout=60.0, proxy=proxy) as client:
+                with httpx.Client(timeout=timeout, proxy=proxy) as client:
                     resp = client.get(ARXIV_API_URL, params=params)
                     if resp.status_code == 429:
                         self.logger.warning("arXiv 429 rate-limited, esperando %ss", _RATE_LIMIT_DELAY)
                         time.sleep(_RATE_LIMIT_DELAY)
                         continue
                     resp.raise_for_status()
-                    return self._parse_atom(resp.text)[:max_results]
+                    results = self._parse_atom(resp.text)[:max_results]
+                    if not results:
+                        self.logger.warning(
+                            "arXiv devolvió 0 resultados para query=%r (intento %d, status=%d, body_len=%d)",
+                            query, attempt + 1, resp.status_code, len(resp.text),
+                        )
+                    return results
             except httpx.HTTPStatusError as exc:
-                self.logger.error("arXiv HTTP error (intento %d): %s", attempt + 1, exc)
+                last_error = f"HTTP {exc.response.status_code}"
+                self.logger.error("arXiv HTTP error (intento %d/%d): %s", attempt + 1, retries, exc)
                 if attempt < retries - 1:
                     time.sleep(_RATE_LIMIT_DELAY)
+            except httpx.TimeoutException as exc:
+                last_error = f"Timeout: {exc}"
+                self.logger.error("arXiv timeout (intento %d/%d): %s", attempt + 1, retries, exc)
+                if attempt < retries - 1:
+                    time.sleep(_RATE_LIMIT_DELAY * 2)  # esperar más tras timeout
             except Exception as exc:
-                self.logger.error("arXiv error (intento %d): %s", attempt + 1, exc)
+                last_error = str(exc)
+                self.logger.error("arXiv error (intento %d/%d): %s", attempt + 1, retries, exc)
                 if attempt < retries - 1:
                     time.sleep(_RATE_LIMIT_DELAY)
 
+        self.logger.error("arXiv: todos los intentos fallaron para query=%r. Último error: %s", query, last_error)
         return []
 
     def _parse_atom(self, xml_text: str) -> list[ArticleData]:
