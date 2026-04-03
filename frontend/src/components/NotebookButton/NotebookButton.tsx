@@ -18,10 +18,14 @@ export const NotebookButton = ({ onNotebookCreated }: NotebookButtonProps) => {
     retry: false,
     onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ["notebooks"] });
-      if (onNotebookCreated) {
-        onNotebookCreated(response.id);
+      if (response?.id) {
+        if (onNotebookCreated) {
+          onNotebookCreated(response.id);
+        }
+        navigate(`/notebooks/${response.id}`);
+      } else {
+        console.warn("createNotebook response missing id:", response);
       }
-      navigate(`/notebooks/${response.id}`);
     },
     onError: (error) => {
       console.error("Error creating notebook:", error);

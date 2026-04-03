@@ -31,7 +31,14 @@ export default function Home() {
     retry: false,
     onSuccess: (nb) => {
       queryClient.invalidateQueries({ queryKey: ["notebooks"] });
-      navigate(`/notebooks/${nb.id}`);
+      if (nb?.id) {
+        navigate(`/notebooks/${nb.id}`);
+      } else {
+        console.warn("createNotebook response missing id:", nb);
+      }
+    },
+    onError: (error) => {
+      console.error("Error creating notebook:", error);
     },
   });
 

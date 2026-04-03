@@ -1,6 +1,7 @@
 /**
  * Cliente HTTP para la API Django.
- * Todos los endpoints usan el proxy de Vite → /api/*
+ * - Dev: Vite proxy /api/* → localhost:8000
+ * - Prod: VITE_API_BASE_URL apunta directo al backend (CORS habilitado)
  */
 import axios from "axios";
 import type {
