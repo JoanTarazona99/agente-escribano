@@ -36,7 +36,15 @@ export default function Notebook() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const notebookId = Number(id);
+  const isValidId = !!id && !Number.isNaN(notebookId) && notebookId > 0;
   const DEFAULT_INLINE_QUERY = "water dissociation recombination electromembrane bipolar membrane transport";
+
+  // Redirect to home if the notebook ID in the URL is invalid (e.g. /notebooks/undefined)
+  useEffect(() => {
+    if (!isValidId) {
+      navigate("/", { replace: true });
+    }
+  }, [isValidId, navigate]);
 
   // ─── Header state ───
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -90,7 +98,7 @@ export default function Notebook() {
   const { data: notebook, isLoading, error } = useQuery({
     queryKey: ["notebook", id],
     queryFn: () => getNotebook(notebookId),
-    enabled: !!id,
+    enabled: isValidId,
   });
 
   // ─── Articles from this notebook (filtered + paginated via ArticleFilter) ───
@@ -104,7 +112,7 @@ export default function Notebook() {
   const { data: articlesData, isLoading: articlesLoading } = useQuery({
     queryKey: ["notebook-articles", notebookId, mergedFilters],
     queryFn: () => getArticles(mergedFilters),
-    enabled: !!id && !useJobFallback,
+    enabled: isValidId && !useJobFallback,
   });
 
   useEffect(() => {
