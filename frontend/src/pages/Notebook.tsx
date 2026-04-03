@@ -65,10 +65,10 @@ export default function Notebook() {
   const SOURCES_ALL: { id: SourceDatabase; label: string; disabled?: boolean }[] = [
     { id: "arxiv",    label: "arXiv" },
     { id: "elibrary", label: "eLIBRARY" },
-    { id: "scopus",   label: "Scopus",  disabled: true },
+    { id: "scopus",   label: "Scopus" },
     { id: "wos",      label: "WOS",     disabled: true },
   ];
-  const [activeSources, setActiveSources] = useState<SourceDatabase[]>(["arxiv", "elibrary"]);
+  const [activeSources, setActiveSources] = useState<SourceDatabase[]>(["arxiv", "elibrary", "scopus"]);
   const MAX_PER_SOURCE = 10;
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null);
   const [searchText, setSearchText] = useState("");
