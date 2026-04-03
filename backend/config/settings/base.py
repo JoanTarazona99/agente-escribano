@@ -195,6 +195,10 @@ OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
 SCOPUS_API_KEY = env("SCOPUS_API_KEY", default="")
 WOS_API_KEY = env("WOS_API_KEY", default="")
 
+# ─── Proxy HTTP (desarrollo local detrás de VPN) ─────────
+# Formato: http://127.0.0.1:10809  — vacío = sin proxy.
+HTTP_PROXY = env("HTTP_PROXY", default="")
+
 # ─── eLIBRARY ────────────────────────────────────────────
 # URL de proxy residencial ruso (opcional). Formato: http://user:pass@host:port
 ELIBRARY_PROXY_URL = env("ELIBRARY_PROXY_URL", default="")

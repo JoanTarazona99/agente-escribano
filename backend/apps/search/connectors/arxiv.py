@@ -46,10 +46,14 @@ class ArxivConnector(BaseSearchConnector):
             "sortOrder": "descending",
         }
 
+        # Proxy para desarrollo local (VPN); vacío en producción.
+        from django.conf import settings
+        proxy = getattr(settings, "HTTP_PROXY", "") or None
+
         retries = 3
         for attempt in range(retries):
             try:
-                with httpx.Client(timeout=30.0) as client:
+                with httpx.Client(timeout=60.0, proxy=proxy) as client:
                     resp = client.get(ARXIV_API_URL, params=params)
                     if resp.status_code == 429:
                         self.logger.warning("arXiv 429 rate-limited, esperando %ss", _RATE_LIMIT_DELAY)
