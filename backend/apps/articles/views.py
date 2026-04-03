@@ -91,11 +91,17 @@ class ArticleViewSet(
     @extend_schema(
         summary="Analizar artículo con IA",
         description=(
-            "Envía el artículo al servicio Ollama para generar traducción, "
-            "resumen y análisis. El proceso se ejecuta en segundo plano. "
-            "Consulte GET /api/articles/{id}/ para ver el resultado."
+            "Envía el artículo al servicio LLM para generar traducción, "
+            "resumen y análisis. Devuelve el artículo actualizado.\n\n"
+            "Pasar `?force=true` para regenerar campos IA aunque ya existan."
         ),
-        responses={202: ArticleDetailSerializer},
+        parameters=[
+            OpenApiParameter(
+                "force", type=bool, location=OpenApiParameter.QUERY,
+                description="Forzar re-análisis borrando campos IA previos.",
+            ),
+        ],
+        responses={200: ArticleDetailSerializer},
     )
     @action(detail=True, methods=["post"], url_path="analyze")
     def analyze(self, request: Request, pk: int = None) -> Response:
@@ -103,9 +109,23 @@ class ArticleViewSet(
         from apps.agent.services import get_llm_service
 
         article = self.get_object()
+        force = request.query_params.get("force", "").lower() == "true"
+
+        # Si force=true, resetear campos IA para que el servicio los regenere.
+        if force:
+            logger.info("🔄 Re-análisis forzado para artículo %s", article.pk)
+            for field in (
+                "title_es", "title_en", "title_ru",
+                "abstract_es", "abstract_en", "abstract_ru",
+                "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
+                "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
+            ):
+                setattr(article, field, "")
+            article.ai_processed = False
+            article.save()
 
         try:
-            service = get_llm_service()  # Usa factory para seleccionar Ollama u OpenRouter
+            service = get_llm_service()
             service.process_article(article)
             article.refresh_from_db()
         except Exception as exc:

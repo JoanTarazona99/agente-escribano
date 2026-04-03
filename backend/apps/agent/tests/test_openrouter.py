@@ -1,0 +1,409 @@
+"""Tests del OpenRouterService con mocks de httpx."""
+import json
+
+import httpx
+import pytest
+from unittest.mock import MagicMock, patch
+
+from apps.agent.openrouter_service import OpenRouterService
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+def _openrouter_response(content: str) -> dict:
+    """Simula la estructura de respuesta de OpenRouter API."""
+    return {
+        "choices": [{"message": {"content": content}}],
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
+    }
+
+
+def _make_httpx_response(json_body: dict, status_code: int = 200) -> httpx.Response:
+    """Crea un httpx.Response fake."""
+    resp = httpx.Response(
+        status_code=status_code,
+        json=json_body,
+        request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+    )
+    return resp
+
+
+def _make_service() -> OpenRouterService:
+    """Instancia el servicio con settings mockeados."""
+    with patch.multiple(
+        "apps.agent.openrouter_service.settings",
+        OPENROUTER_API_KEY="test-key-123",
+        OPENROUTER_MODEL="test-model",
+    ):
+        return OpenRouterService()
+
+
+# ── Tests unitarios (sin DB) ────────────────────────────────────────
+
+
+class TestCallOpenRouter:
+    """Tests para _call_openrouter (llamada raw)."""
+
+    def test_returns_content_on_success(self):
+        service = _make_service()
+        mock_resp = _make_httpx_response(_openrouter_response("Hello world"))
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.return_value = mock_resp
+
+            result = service._call_openrouter("test prompt")
+            assert result == "Hello world"
+
+    def test_returns_none_on_timeout(self):
+        service = _make_service()
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.side_effect = httpx.TimeoutException("timeout")
+
+            result = service._call_openrouter("test prompt")
+            assert result is None
+
+    def test_returns_none_on_http_error(self):
+        service = _make_service()
+        error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.return_value = error_resp
+
+            result = service._call_openrouter("test prompt")
+            assert result is None
+
+    def test_returns_none_when_no_choices(self):
+        service = _make_service()
+        mock_resp = _make_httpx_response({"choices": []})
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.return_value = mock_resp
+
+            result = service._call_openrouter("test prompt")
+            assert result is None
+
+
+class TestCallOpenRouterJson:
+    """Tests para _call_openrouter_json (parseo JSON)."""
+
+    def test_parses_clean_json(self):
+        service = _make_service()
+        json_str = '{"title_es": "Hola", "title_ru": "Privet"}'
+        with patch.object(service, "_call_openrouter", return_value=json_str):
+            result = service._call_openrouter_json("prompt")
+            assert result == {"title_es": "Hola", "title_ru": "Privet"}
+
+    def test_strips_markdown_code_fence(self):
+        service = _make_service()
+        raw = '```json\n{"summary": "test"}\n```'
+        with patch.object(service, "_call_openrouter", return_value=raw):
+            result = service._call_openrouter_json("prompt")
+            assert result == {"summary": "test"}
+
+    def test_extracts_json_from_surrounding_text(self):
+        service = _make_service()
+        raw = 'Sure! Here is the result:\n{"key": "value"}\nHope this helps!'
+        with patch.object(service, "_call_openrouter", return_value=raw):
+            result = service._call_openrouter_json("prompt")
+            assert result == {"key": "value"}
+
+    def test_returns_none_on_invalid_json(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter", return_value="not json at all"):
+            result = service._call_openrouter_json("prompt")
+            assert result is None
+
+    def test_returns_none_when_call_returns_none(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter", return_value=None):
+            result = service._call_openrouter_json("prompt")
+            assert result is None
+
+
+class TestTranslate:
+    """Tests para _translate (fallback individual)."""
+
+    def test_returns_translation(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter", return_value="  Hola mundo  "):
+            result = service._translate("Hello world", "es")
+            assert result == "Hola mundo"
+
+    def test_returns_empty_for_empty_input(self):
+        service = _make_service()
+        result = service._translate("", "es")
+        assert result == ""
+
+    def test_returns_empty_on_api_failure(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter", return_value=None):
+            result = service._translate("text", "ru")
+            assert result == ""
+
+
+class TestBatchTranslate:
+    """Tests para _batch_translate."""
+
+    def test_batch_returns_translations_from_json(self):
+        service = _make_service()
+        batch_json = {
+            "title_es": "Titulo ES",
+            "title_ru": "Titulo RU",
+            "abstract_es": "Abstract ES",
+            "abstract_ru": "Abstract RU",
+        }
+        with patch.object(service, "_call_openrouter_json", return_value=batch_json):
+            result = service._batch_translate("Title", "Abstract text", "en")
+            assert result["title_es"] == "Titulo ES"
+            assert result["abstract_ru"] == "Abstract RU"
+
+    def test_batch_falls_back_to_individual_on_json_failure(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter_json", return_value=None):
+            with patch.object(service, "_translate", return_value="translated") as mock_tr:
+                result = service._batch_translate("Title", "Abstract", "en")
+                # Should call _translate for each missing lang: es, ru for title + es, ru for abstract
+                assert mock_tr.call_count == 4
+                assert result["title_es"] == "translated"
+
+    def test_batch_returns_empty_when_no_text(self):
+        service = _make_service()
+        result = service._batch_translate("", "", "en")
+        assert result == {}
+
+
+class TestGenerateSummaryAndAnalysis:
+    """Tests para _generate_summary_and_analysis."""
+
+    def test_returns_summary_and_analysis(self):
+        service = _make_service()
+        sa_json = {
+            "summary": "This is a summary of the study...",
+            "analysis": "1. TYPE: experimental\n2. METHODOLOGY: ...",
+        }
+        with patch.object(service, "_call_openrouter_json", return_value=sa_json):
+            result = service._generate_summary_and_analysis("Title", "Abstract", "Authors")
+            assert "summary" in result
+            assert "analysis" in result
+
+    def test_falls_back_to_individual_on_json_failure(self):
+        service = _make_service()
+        with patch.object(service, "_call_openrouter_json", return_value=None):
+            with patch.object(
+                service, "_call_openrouter",
+                side_effect=["Summary text", "Analysis text"],
+            ):
+                result = service._generate_summary_and_analysis("Title", "Abstract", "Auth")
+                assert result["summary"] == "Summary text"
+                assert result["analysis"] == "Analysis text"
+
+    def test_returns_empty_when_no_abstract(self):
+        service = _make_service()
+        result = service._generate_summary_and_analysis("Title", "", "Authors")
+        assert result == {}
+
+
+# ── Tests de integración (con DB) ───────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestProcessArticle:
+    """Tests para process_article — flujo completo con BD."""
+
+    def test_saves_all_ai_fields(self):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Water dissociation in EMS",
+            abstract_original="Study of water recombination in electromembrane systems.",
+            language_original="en",
+        )
+
+        service = _make_service()
+
+        # Mock batch translate (call 1)
+        batch_tr = {
+            "title_es": "Disociacion del agua en EMS",
+            "title_ru": "Dissociatsia vody v EMS",
+            "abstract_es": "Estudio de recombinacion",
+            "abstract_ru": "Issledovanie recombinatsii",
+        }
+        # Mock summary+analysis (call 2)
+        sa = {
+            "summary": "This study investigates water dissociation...",
+            "analysis": "1. TYPE: experimental\n2. METHODOLOGY: voltammetry",
+        }
+        # Mock translate SA (call 3)
+        sa_tr = {
+            "ai_summary_es": "Este estudio investiga...",
+            "ai_summary_ru": "Eto issledovanie...",
+            "ai_analysis_es": "1. TIPO: experimental",
+            "ai_analysis_ru": "1. TIP: eksperimentalnyj",
+        }
+
+        with patch.object(
+            service, "_call_openrouter_json",
+            side_effect=[batch_tr, sa, sa_tr],
+        ):
+            result = service.process_article(article)
+
+        article.refresh_from_db()
+        assert article.ai_processed is True
+        assert article.title_es == "Disociacion del agua en EMS"
+        assert article.title_ru == "Dissociatsia vody v EMS"
+        assert article.abstract_es == "Estudio de recombinacion"
+        assert article.ai_summary == "This study investigates water dissociation..."
+        assert article.ai_summary_en == "This study investigates water dissociation..."
+        assert article.ai_summary_es == "Este estudio investiga..."
+        assert article.ai_analysis == "1. TYPE: experimental\n2. METHODOLOGY: voltammetry"
+        assert article.ai_analysis_ru == "1. TIP: eksperimentalnyj"
+        assert "title_es" in result
+
+    def test_returns_empty_without_api_key(self):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test", abstract_original="Abstract", language_original="en",
+        )
+
+        with patch.multiple(
+            "apps.agent.openrouter_service.settings",
+            OPENROUTER_API_KEY="",
+            OPENROUTER_MODEL="test-model",
+        ):
+            service = OpenRouterService()
+            result = service.process_article(article)
+
+        assert result == {}
+        article.refresh_from_db()
+        assert article.ai_processed is False
+
+    def test_propagates_error_and_saves_partial(self):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test", abstract_original="Abstract", language_original="en",
+        )
+
+        service = _make_service()
+
+        # First batch translate succeeds, then summary fails
+        batch_tr = {"title_es": "Titulo", "title_ru": "Zagolovok"}
+        with patch.object(
+            service, "_call_openrouter_json",
+            side_effect=[batch_tr, Exception("API down")],
+        ):
+            with pytest.raises(Exception, match="API down"):
+                service.process_article(article)
+
+        article.refresh_from_db()
+        # Partial save: translations saved, but no summary/analysis
+        assert article.title_es == "Titulo"
+        assert article.ai_processed is False
+
+    def test_skips_existing_fields(self):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test",
+            abstract_original="Abstract",
+            language_original="en",
+            title_es="Ya traducido",
+            title_ru="Uzhe perevedeno",
+            abstract_es="Ya existe",
+            abstract_ru="Uzhe est",
+            ai_summary="Existing summary",
+            ai_summary_en="Existing summary EN",
+            ai_analysis="Existing analysis",
+            ai_analysis_en="Existing analysis EN",
+        )
+
+        service = _make_service()
+
+        # Only batch_translate_sa should be called (step 3)
+        sa_tr = {
+            "ai_summary_es": "Resumen existente ES",
+            "ai_summary_ru": "Sushchestvuyushchee rezyume",
+            "ai_analysis_es": "Analisis existente ES",
+            "ai_analysis_ru": "Sushchestvuyushchij analiz",
+        }
+
+        with patch.object(
+            service, "_call_openrouter_json",
+            return_value=sa_tr,
+        ) as mock_json:
+            result = service.process_article(article)
+
+        article.refresh_from_db()
+        assert article.ai_processed is True
+        # Title/abstract translations were preserved
+        assert article.title_es == "Ya traducido"
+        # Existing summary preserved
+        assert article.ai_summary == "Existing summary"
+        # New SA translations applied
+        assert article.ai_summary_es == "Resumen existente ES"
+
+
+@pytest.mark.django_db
+class TestForceReanalysis:
+    """Test del flujo force=true (reset en la vista, re-process en servicio)."""
+
+    def test_reprocesses_after_field_reset(self):
+        """Simula el flujo de force=true: la vista resetea campos y llama process_article."""
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test",
+            abstract_original="Abstract",
+            language_original="en",
+            ai_processed=True,
+            ai_summary="Old summary",
+            ai_summary_en="Old summary EN",
+            ai_analysis="Old analysis",
+            ai_analysis_en="Old analysis EN",
+            title_es="Viejo",
+            title_ru="Staryj",
+        )
+
+        # Simular lo que hace la vista con force=true
+        for field in (
+            "title_es", "title_en", "title_ru",
+            "abstract_es", "abstract_en", "abstract_ru",
+            "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
+            "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
+        ):
+            setattr(article, field, "")
+        article.ai_processed = False
+        article.save()
+
+        service = _make_service()
+        batch_tr = {"title_es": "Nuevo", "title_ru": "Novyj"}
+        sa = {"summary": "New summary", "analysis": "New analysis"}
+        sa_tr = {
+            "ai_summary_es": "Nuevo resumen",
+            "ai_summary_ru": "Novoe rezyume",
+            "ai_analysis_es": "Nuevo analisis",
+            "ai_analysis_ru": "Novyj analiz",
+        }
+
+        with patch.object(
+            service, "_call_openrouter_json",
+            side_effect=[batch_tr, sa, sa_tr],
+        ):
+            service.process_article(article)
+
+        article.refresh_from_db()
+        assert article.ai_processed is True
+        assert article.title_es == "Nuevo"
+        assert article.ai_summary == "New summary"
+        assert article.ai_analysis == "New analysis"
+        assert article.ai_summary_es == "Nuevo resumen"

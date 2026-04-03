@@ -66,9 +66,16 @@ export async function getArticle(id: number): Promise<Article> {
   return data;
 }
 
-/** Lanza el análisis IA de un artículo. */
-export async function analyzeArticle(id: number): Promise<Article> {
-  const { data } = await api.post<Article>(`/articles/${id}/analyze/`);
+/** Lanza el análisis IA de un artículo. Con force=true regenera campos existentes. */
+export async function analyzeArticle(id: number, force = false): Promise<Article> {
+  const { data } = await api.post<Article>(
+    `/articles/${id}/analyze/`,
+    null,
+    {
+      params: force ? { force: "true" } : {},
+      timeout: 180_000, // 3 min — el LLM puede tardar con traducciones
+    },
+  );
   return data;
 }
 

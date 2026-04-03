@@ -167,7 +167,7 @@ export default function Notebook() {
   });
 
   const analyzeMutation = useMutation({
-    mutationFn: () => analyzeArticle(selectedArticleId!),
+    mutationFn: (force = false) => analyzeArticle(selectedArticleId!, force),
     onSuccess: (data) => {
       queryClient.setQueryData(["article", String(selectedArticleId)], data);
     },
@@ -559,7 +559,9 @@ export default function Notebook() {
 
                     <button
                       className="nb-studio__action-btn"
-                      onClick={() => analyzeMutation.mutate()}
+                      onClick={() =>
+                        analyzeMutation.mutate(!!selectedArticle.ai_processed)
+                      }
                       disabled={analyzeMutation.isPending}
                     >
                       <span className="nb-studio__action-icon">✨</span>
