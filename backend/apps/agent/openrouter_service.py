@@ -70,20 +70,25 @@ _AI_UPDATE_FIELDS = [
 ]
 
 # Modelos gratuitos de fallback, ordenados por preferencia.
-# Si el modelo principal da 429, se prueban estos (maximo 2 para no exceder timeout).
+# Si el principal da 429, se prueban estos. Proveedores diversos para
+# maximizar disponibilidad cuando uno aplica rate-limit global.
+# Duplicados con self.model se filtran automaticamente.
 _FALLBACK_MODELS = [
     "google/gemma-3-27b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-8b:free",
+    "deepseek/deepseek-r1-0528:free",
+    "microsoft/phi-4-reasoning-plus:free",
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
-_MAX_RETRIES_PER_MODEL = 1
-# Espera entre reintentos (en segundos).
-_RETRY_DELAY = 2.0
+_MAX_RETRIES_PER_MODEL = 2
+# Base para backoff exponencial: delay = base * 2^attempt (2s, 4s).
+_RETRY_BASE_DELAY = 2.0
 # Tiempo maximo total para _call_openrouter (segundos).
-# Con background tasks ya no hay restriccion de Gunicorn timeout, pero
-# mantenemos un deadline razonable por llamada individual.
-_CALL_DEADLINE = 25.0
+# Con background tasks (django-q2) no hay restriccion de Gunicorn timeout;
+# 90s permite recorrer ~6 modelos x 3 intentos con backoff.
+_CALL_DEADLINE = 90.0
 
 
 class OpenRouterService:
@@ -99,7 +104,7 @@ class OpenRouterService:
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
         self.model = getattr(settings, "OPENROUTER_MODEL", "google/gemma-3-12b-it:free")
-        self.timeout = 25.0  # Sincronizado con _CALL_DEADLINE
+        self.timeout = 30.0  # Per-request HTTP timeout
 
     # ================================================================
     # Punto de entrada principal
@@ -531,13 +536,14 @@ class OpenRouterService:
                         "OpenRouter HTTP %d (%s, intento %d): %s",
                         code, model, attempt + 1, body[:200],
                     )
-                    # 429 = rate limit -> reintentar con delay corto
+                    # 429 = rate limit -> reintentar con backoff exponencial
                     if code == 429 and attempt < _MAX_RETRIES_PER_MODEL:
+                        delay = _RETRY_BASE_DELAY * (2 ** attempt)
                         logger.info(
-                            "Rate-limited en %s, espera %.0fs...",
-                            model, _RETRY_DELAY,
+                            "Rate-limited en %s, espera %.0fs (intento %d)...",
+                            model, delay, attempt + 1,
                         )
-                        time.sleep(_RETRY_DELAY)
+                        time.sleep(delay)
                         continue
                     # 429 agotado retries -> probar siguiente modelo
                     if code == 429:

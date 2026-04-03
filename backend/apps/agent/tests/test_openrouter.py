@@ -67,7 +67,7 @@ class TestCallOpenRouter:
     @patch("apps.agent.openrouter_service.time.monotonic")
     @patch("apps.agent.openrouter_service.time.sleep")
     def test_retries_on_429_then_falls_back(self, mock_sleep, mock_monotonic):
-        """429 agota retry en modelo principal, luego fallback funciona."""
+        """429 agota retries en modelo principal, luego fallback funciona."""
         service = _make_service()
         error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
         ok_resp = _make_httpx_response(_openrouter_response("Fallback OK"))
@@ -80,10 +80,10 @@ class TestCallOpenRouter:
         def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            # Intentos 1-2 (test-model: original + 1 retry): 429
-            if call_count <= 2:
+            # Intentos 1-3 (test-model: original + 2 retries): 429
+            if call_count <= 3:
                 return error_resp
-            # Intento 3 (primer fallback): exito
+            # Intento 4 (primer fallback): exito
             return ok_resp
 
         with patch("httpx.Client") as MockClient:
@@ -93,7 +93,7 @@ class TestCallOpenRouter:
 
             result = service._call_openrouter("test prompt")
             assert result == "Fallback OK"
-            assert mock_sleep.call_count == 1  # 1 retry con sleep
+            assert mock_sleep.call_count == 2  # 2 retries con backoff exponencial
 
     @patch("apps.agent.openrouter_service.time.monotonic")
     @patch("apps.agent.openrouter_service.time.sleep")

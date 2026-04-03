@@ -612,7 +612,12 @@ export default function Notebook() {
                     {selectedArticle.ai_error && !selectedArticle.ai_processing && (
                       <div className="nb-studio__error-badge" role="alert">
                         <span>⚠️</span>
-                        <span>{t("toast.previous_error")}: {selectedArticle.ai_error.slice(0, 120)}</span>
+                        <span>{t("toast.previous_error")}: {
+                          selectedArticle.ai_error_code === "rate_limited" ? t("toast.rate_limited")
+                          : selectedArticle.ai_error_code === "auth_error" ? t("toast.auth_error")
+                          : selectedArticle.ai_error_code === "timeout" ? t("toast.timeout")
+                          : selectedArticle.ai_error.slice(0, 120)
+                        }</span>
                       </div>
                     )}
 
