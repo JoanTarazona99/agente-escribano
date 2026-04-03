@@ -85,9 +85,10 @@ _MAX_RETRIES_PER_MODEL = 2
 # Base para backoff exponencial: delay = base * 2^attempt (2s, 4s).
 _RETRY_BASE_DELAY = 2.0
 # Tiempo maximo total para _call_openrouter (segundos).
-# Con background tasks (django-q2) no hay restriccion de Gunicorn timeout;
-# 90s permite recorrer ~6 modelos x 3 intentos con backoff.
-_CALL_DEADLINE = 90.0
+# Con 3 batch calls secuenciales, el peor caso es 60 x 3 = 180s,
+# que deja margen frente al timeout de django-q2 (300s) para
+# que el except pueda limpiar la BD antes del kill.
+_CALL_DEADLINE = 60.0
 
 
 class OpenRouterService:
@@ -103,7 +104,9 @@ class OpenRouterService:
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
         self.model = getattr(settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free")
-        self.timeout = 30.0  # Per-request HTTP timeout
+        # Timeout explicito por fase para evitar hang en lectura SSL stream.
+        # connect=10s, read=25s (la fase que colgaba), write=10s, pool=5s.
+        self.timeout = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=5.0)
 
     # ================================================================
     # Punto de entrada principal
@@ -222,10 +225,21 @@ class OpenRouterService:
                 "Error fatal procesando articulo %s con OpenRouter: %s",
                 article.id, e,
             )
-            # Guardar progreso parcial (p.ej. traducciones ya obtenidas),
-            # pero NO marcar ai_processed = True.
+            # Resetear ai_processing y guardar error + progreso parcial.
+            # Usar update() atomico (1 SQL) por si SIGALRM interrumpe.
+            error_code = getattr(e, "code", "unknown")
+            partial = {}
+            for f in _AI_UPDATE_FIELDS:
+                val = getattr(article, f, None)
+                if val and f not in ("ai_processed", "ai_processing", "ai_error", "ai_error_code"):
+                    partial[f] = val
+            partial.update(
+                ai_processing=False,
+                ai_error=str(e)[:500],
+                ai_error_code=error_code,
+            )
             try:
-                article.save()
+                Article.objects.filter(pk=article.pk).update(**partial)
             except Exception:
                 pass
             raise
@@ -483,8 +497,16 @@ class OpenRouterService:
                 }
 
                 try:
+                    # Ajustar read timeout al menor entre el configurado y el remaining
+                    read_cap = min(self.timeout.read or 25.0, remaining)
+                    req_timeout = httpx.Timeout(
+                        connect=self.timeout.connect,
+                        read=read_cap,
+                        write=self.timeout.write,
+                        pool=self.timeout.pool,
+                    )
                     with httpx.Client(
-                        timeout=min(self.timeout, remaining),
+                        timeout=req_timeout,
                     ) as client:
                         logger.debug(
                             "OpenRouter %s (intento %d), max_tokens=%d",
@@ -578,8 +600,8 @@ class OpenRouterService:
 
                 except httpx.TimeoutException:
                     logger.warning(
-                        "OpenRouter timeout (>%.0fs) con %s",
-                        self.timeout, model,
+                        "OpenRouter timeout (read=%.0fs) con %s",
+                        self.timeout.read or 25.0, model,
                     )
                     all_rate_limited = False
                     break  # Probar siguiente modelo

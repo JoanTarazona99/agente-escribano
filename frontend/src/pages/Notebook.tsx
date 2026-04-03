@@ -184,6 +184,8 @@ export default function Notebook() {
   });
 
   // ─── Polling analyze status ───
+  const ANALYZE_POLL_TIMEOUT = 120_000; // 2 min max polling
+
   const { data: analyzeStatus } = useQuery({
     queryKey: ["analyze-status", analyzingArticleId],
     queryFn: () => getAnalyzeStatus(analyzingArticleId!),
@@ -193,6 +195,21 @@ export default function Notebook() {
       return st === "processing" || !st ? 3000 : false;
     },
   });
+
+  // Safety timer: stop polling after 2 minutes if analysis is stuck
+  useEffect(() => {
+    if (!analyzingArticleId) return;
+    const timer = setTimeout(() => {
+      if (analyzeToastRef.current) {
+        toast.update(analyzeToastRef.current, t("toast.timeout"), "error", 8000);
+        analyzeToastRef.current = null;
+      }
+      queryClient.invalidateQueries({ queryKey: ["article", String(analyzingArticleId)] });
+      setAnalyzingArticleId(null);
+    }, ANALYZE_POLL_TIMEOUT);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyzingArticleId]);
 
   useEffect(() => {
     if (!analyzeStatus || !analyzingArticleId) return;

@@ -184,7 +184,7 @@ Q_CLUSTER = {
     "name": "agente-escribano",
     "workers": 2,
     "timeout": 300,        # 5 min máximo por tarea
-    "retry": 360,          # reintentar a los 6 min si no terminó
+    "retry": 600,          # reintentar a los 10 min (debe ser > timeout para evitar re-enqueue prematuro)
     "queue_limit": 50,
     "bulk": 10,
     "orm": "default",      # ORM broker — usa la BD existente (sin Redis)

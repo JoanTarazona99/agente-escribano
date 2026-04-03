@@ -1,6 +1,8 @@
 """Vistas DRF para artículos científicos."""
 import logging
+from datetime import timedelta
 
+from django.utils import timezone
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
@@ -160,6 +162,25 @@ class ArticleViewSet(
         article = self.get_object()
 
         if article.ai_processing:
+            # Red de seguridad: si lleva >7 min en "processing",
+            # el worker murió sin limpiar. Auto-resetear.
+            stale_cutoff = timezone.now() - timedelta(minutes=7)
+            if article.updated_at < stale_cutoff:
+                logger.warning(
+                    "Artículo %s atascado en ai_processing=True desde %s. Auto-reset.",
+                    article.pk, article.updated_at,
+                )
+                Article.objects.filter(pk=article.pk).update(
+                    ai_processing=False,
+                    ai_error="Análisis interrumpido (timeout del worker)",
+                    ai_error_code="timeout",
+                )
+                article.refresh_from_db()
+                return Response({
+                    "status": "failed",
+                    "error": article.ai_error,
+                    "error_code": "timeout",
+                })
             return Response({"status": "processing"})
 
         if article.ai_error:

@@ -367,11 +367,14 @@ def run_analysis(article_id: int, force: bool = False) -> str:
             article_id, error_code, error_msg,
         )
 
-        article.ai_processing = False
-        article.ai_error = error_msg
-        article.ai_error_code = error_code
+        # UPDATE atomico (1 SQL) — resistente a SIGALRM de django-q2.
+        # No usa article.save() porque puede ser interrumpido a mitad.
         try:
-            article.save(update_fields=["ai_processing", "ai_error", "ai_error_code"])
+            Article.objects.filter(pk=article_id).update(
+                ai_processing=False,
+                ai_error=error_msg,
+                ai_error_code=error_code,
+            )
         except Exception:
             logger.exception("No se pudo guardar estado de error para artículo %s", article_id)
 
