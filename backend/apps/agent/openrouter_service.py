@@ -6,10 +6,12 @@ API: https://openrouter.ai/api/v1
 Documentacion: https://openrouter.ai/docs
 
 Optimizado: 3 llamadas API batch (en vez de 12 secuenciales).
+Resiliente: retry con backoff en 429 + fallback a modelos alternativos.
 """
 import logging
 import json
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -27,6 +29,20 @@ _AI_UPDATE_FIELDS = [
     "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
     "ai_processed",
 ]
+
+# Modelos gratuitos de fallback, ordenados por preferencia.
+# Si el modelo principal da 429 repetidamente, se prueban estos.
+_FALLBACK_MODELS = [
+    "google/gemma-3-12b-it:free",
+    "google/gemma-3-27b-it:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+]
+
+# Reintentos en 429 antes de saltar al siguiente modelo.
+_MAX_RETRIES_PER_MODEL = 2
+# Espera base entre reintentos (en segundos). Se multiplica por intento.
+_RETRY_BASE_DELAY = 3.0
 
 
 class OpenRouterService:
@@ -373,66 +389,121 @@ class OpenRouterService:
         self, prompt: str, max_tokens: int = 500,
     ) -> Optional[str]:
         """
-        Llamada generica a OpenRouter API.
-        Retorna texto crudo o None si falla.
+        Llamada generica a OpenRouter API con retry y fallback de modelos.
+
+        Estrategia:
+        1. Intenta con self.model (hasta _MAX_RETRIES_PER_MODEL en 429).
+        2. Si agota reintentos, prueba cada modelo en _FALLBACK_MODELS.
+        3. Si todos fallan, retorna None.
         """
+        models_to_try = [self.model] + [
+            m for m in _FALLBACK_MODELS if m != self.model
+        ]
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "HTTP-Referer": "https://agente-escribano.onrender.com",
             "X-Title": "Agente Escribano - Universidad",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": max_tokens,
-            "top_p": 0.9,
-        }
 
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                logger.debug(
-                    "OpenRouter %s, max_tokens=%d", self.model, max_tokens,
-                )
-                resp = client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
+        for model in models_to_try:
+            for attempt in range(_MAX_RETRIES_PER_MODEL):
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": max_tokens,
+                    "top_p": 0.9,
+                }
 
-            data = resp.json()
-            if not data.get("choices"):
-                logger.warning("OpenRouter sin choices: %s", data)
-                return None
+                try:
+                    with httpx.Client(timeout=self.timeout) as client:
+                        logger.debug(
+                            "OpenRouter %s (intento %d), max_tokens=%d",
+                            model, attempt + 1, max_tokens,
+                        )
+                        resp = client.post(
+                            f"{self.base_url}/chat/completions",
+                            headers=headers,
+                            json=payload,
+                        )
+                        resp.raise_for_status()
 
-            content = (
-                data["choices"][0].get("message", {}).get("content", "")
+                    data = resp.json()
+                    if not data.get("choices"):
+                        logger.warning(
+                            "OpenRouter sin choices (%s): %s", model, data,
+                        )
+                        break  # Probar siguiente modelo
+
+                    content = (
+                        data["choices"][0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    if not content:
+                        logger.warning(
+                            "OpenRouter content vacio (%s)", model,
+                        )
+                        break  # Probar siguiente modelo
+
+                    if model != self.model:
+                        logger.info(
+                            "OpenRouter: %s funciono como fallback "
+                            "(modelo principal %s no disponible)",
+                            model, self.model,
+                        )
+                    logger.debug(
+                        "OpenRouter: %d caracteres (%s)", len(content), model,
+                    )
+                    return content.strip()
+
+                except httpx.HTTPStatusError as e:
+                    code = e.response.status_code
+                    body = e.response.text[:500]
+                    logger.warning(
+                        "OpenRouter HTTP %d (%s, intento %d): %s",
+                        code, model, attempt + 1, body[:200],
+                    )
+                    # 429 = rate limit -> reintentar con backoff
+                    if code == 429:
+                        delay = _RETRY_BASE_DELAY * (attempt + 1)
+                        logger.info(
+                            "Rate-limited en %s, espera %.1fs...",
+                            model, delay,
+                        )
+                        time.sleep(delay)
+                        continue
+                    # Otros 4xx (401, 403, 404) son fatales
+                    if 400 <= code < 500:
+                        raise RuntimeError(
+                            f"OpenRouter error {code}: {body[:200]}"
+                        ) from e
+                    # 5xx -> probar siguiente modelo
+                    break
+
+                except httpx.TimeoutException:
+                    logger.error(
+                        "OpenRouter timeout (>%ds) con %s",
+                        self.timeout, model,
+                    )
+                    break  # Probar siguiente modelo
+
+                except Exception as e:
+                    logger.error(
+                        "OpenRouter error con %s: %s", model, str(e)[:500],
+                    )
+                    raise
+
+            # Agotados reintentos para este modelo, probar siguiente
+            logger.info(
+                "Modelo %s agotado, probando siguiente fallback...", model,
             )
-            if not content:
-                logger.warning("OpenRouter content vacio")
-                return None
 
-            logger.debug("OpenRouter: %d caracteres", len(content))
-            return content.strip()
-
-        except httpx.HTTPStatusError as e:
-            code = e.response.status_code
-            body = e.response.text[:500]
-            logger.error("OpenRouter HTTP %d: %s", code, body)
-            # Errores 4xx (excepto 429) son fatales: API key invalida,
-            # modelo inexistente, etc. Propagarlos para que el usuario
-            # vea un mensaje claro en vez de campos vacios silenciosos.
-            if 400 <= code < 500 and code != 429:
-                raise RuntimeError(
-                    f"OpenRouter error {code}: {body[:200]}"
-                ) from e
-            return None
-        except httpx.TimeoutException:
-            logger.error("OpenRouter timeout (>%ds)", self.timeout)
-            return None
-        except Exception as e:
-            logger.error("OpenRouter error: %s", str(e)[:500])
-            raise
+        logger.error(
+            "Todos los modelos agotados (principal: %s, fallbacks: %s)",
+            self.model, [m for m in models_to_try[1:]],
+        )
+        return None
 

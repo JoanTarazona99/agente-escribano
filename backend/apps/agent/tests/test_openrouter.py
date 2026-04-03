@@ -42,7 +42,7 @@ def _make_service() -> OpenRouterService:
 
 
 class TestCallOpenRouter:
-    """Tests para _call_openrouter (llamada raw)."""
+    """Tests para _call_openrouter (llamada raw con retry + fallback)."""
 
     def test_returns_content_on_success(self):
         service = _make_service()
@@ -56,18 +56,36 @@ class TestCallOpenRouter:
             result = service._call_openrouter("test prompt")
             assert result == "Hello world"
 
-    def test_returns_none_on_timeout(self):
+    @patch("apps.agent.openrouter_service.time.sleep")
+    def test_retries_on_429_then_falls_back(self, mock_sleep):
+        """429 agota reintentos en modelo principal, luego fallback funciona."""
         service = _make_service()
+        error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
+        ok_resp = _make_httpx_response(_openrouter_response("Fallback OK"))
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Primeras 2 llamadas (test-model): 429
+            if call_count <= 2:
+                return error_resp
+            # Tercer intento (primer fallback): exito
+            return ok_resp
 
         with patch("httpx.Client") as MockClient:
             MockClient.return_value.__enter__ = lambda s: s
             MockClient.return_value.__exit__ = MagicMock(return_value=False)
-            MockClient.return_value.post.side_effect = httpx.TimeoutException("timeout")
+            MockClient.return_value.post.side_effect = side_effect
 
             result = service._call_openrouter("test prompt")
-            assert result is None
+            assert result == "Fallback OK"
+            assert mock_sleep.call_count == 2  # 2 retries con sleep
 
-    def test_returns_none_on_http_error(self):
+    @patch("apps.agent.openrouter_service.time.sleep")
+    def test_returns_none_when_all_models_exhausted(self, mock_sleep):
+        """Si todos los modelos dan 429, retorna None."""
         service = _make_service()
         error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
 
@@ -79,8 +97,29 @@ class TestCallOpenRouter:
             result = service._call_openrouter("test prompt")
             assert result is None
 
+    def test_returns_none_on_timeout_tries_next_model(self):
+        """Timeout en modelo principal, fallback funciona."""
+        service = _make_service()
+        ok_resp = _make_httpx_response(_openrouter_response("Fallback"))
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.TimeoutException("timeout")
+            return ok_resp
+
+        with patch("httpx.Client") as MockClient:
+            MockClient.return_value.__enter__ = lambda s: s
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value.post.side_effect = side_effect
+
+            result = service._call_openrouter("test prompt")
+            assert result == "Fallback"
+
     def test_raises_on_4xx_model_not_found(self):
-        """Errores 4xx (excepto 429) ahora se propagan como RuntimeError."""
+        """Errores 4xx (excepto 429) se propagan como RuntimeError."""
         service = _make_service()
         error_resp = _make_httpx_response(
             {"error": {"message": "No endpoints found for model"}}, status_code=404,
