@@ -1,0 +1,21 @@
+#!/bin/sh
+# start.sh — Arranque para producción (Render free tier, 1 container)
+# Lanza Gunicorn + django-q2 qcluster en paralelo.
+set -e
+
+echo "==> Collecting static files..."
+python manage.py collectstatic --noinput
+
+echo "==> Running migrations..."
+python manage.py migrate --noinput
+
+echo "==> Starting django-q2 worker (background)..."
+python manage.py qcluster &
+
+echo "==> Starting Gunicorn..."
+exec gunicorn config.wsgi:application \
+    --bind 0.0.0.0:8000 \
+    --workers 2 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile -

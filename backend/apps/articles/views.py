@@ -89,10 +89,10 @@ class ArticleViewSet(
         return ArticleDetailSerializer
 
     @extend_schema(
-        summary="Analizar artículo con IA",
+        summary="Analizar artículo con IA (background)",
         description=(
-            "Envía el artículo al servicio LLM para generar traducción, "
-            "resumen y análisis. Devuelve el artículo actualizado.\n\n"
+            "Encola el artículo para análisis IA en background (django-q2). "
+            "Retorna 202 Accepted con el estado de la tarea.\n\n"
             "Pasar `?force=true` para regenerar campos IA aunque ya existan."
         ),
         parameters=[
@@ -101,45 +101,82 @@ class ArticleViewSet(
                 description="Forzar re-análisis borrando campos IA previos.",
             ),
         ],
-        responses={200: ArticleDetailSerializer},
+        responses={202: dict},
     )
     @action(detail=True, methods=["post"], url_path="analyze")
     def analyze(self, request: Request, pk: int = None) -> Response:
-        """Ejecuta el análisis IA de forma síncrona y devuelve el artículo procesado."""
-        from apps.agent.services import get_llm_service
+        """Encola el análisis IA en background y retorna 202."""
+        from django_q.tasks import async_task
 
         article = self.get_object()
         force = request.query_params.get("force", "").lower() == "true"
 
-        # Si force=true, resetear campos IA para que el servicio los regenere.
-        if force:
-            logger.info("🔄 Re-análisis forzado para artículo %s", article.pk)
-            for field in (
-                "title_es", "title_en", "title_ru",
-                "abstract_es", "abstract_en", "abstract_ru",
-                "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
-                "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
-            ):
-                setattr(article, field, "")
-            article.ai_processed = False
-            article.save()
-
-        try:
-            service = get_llm_service()
-            service.process_article(article)
-            article.refresh_from_db()
-        except Exception as exc:
-            logger.error(
-                "Error en análisis IA del artículo %s: %s",
-                article.pk, exc, exc_info=True,
-            )
+        # Si ya está en proceso, no encolar de nuevo
+        if article.ai_processing:
             return Response(
-                {"detail": f"Error en análisis IA: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {"status": "processing", "detail": "El análisis ya está en curso."},
+                status=status.HTTP_202_ACCEPTED,
             )
 
-        serializer = ArticleDetailSerializer(article)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Marcar como en cola inmediatamente para que el frontend lo detecte
+        article.ai_processing = True
+        article.ai_error = ""
+        article.ai_error_code = ""
+        article.save(update_fields=["ai_processing", "ai_error", "ai_error_code"])
+
+        # Encolar tarea en background
+        task_id = async_task(
+            "apps.agent.services.run_analysis",
+            article.pk,
+            force,
+            task_name=f"analyze-{article.pk}",
+        )
+
+        logger.info(
+            "📋 Análisis encolado para artículo %s (task_id=%s, force=%s)",
+            article.pk, task_id, force,
+        )
+
+        return Response(
+            {
+                "status": "queued",
+                "task_id": str(task_id) if task_id else None,
+                "article_id": article.pk,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(
+        summary="Estado del análisis IA",
+        description=(
+            "Consulta el estado del análisis IA de un artículo.\n\n"
+            "Posibles estados: queued, processing, completed, failed."
+        ),
+        responses={200: dict},
+    )
+    @action(detail=True, methods=["get"], url_path="analyze-status")
+    def analyze_status(self, request: Request, pk: int = None) -> Response:
+        """Devuelve el estado del análisis IA del artículo."""
+        article = self.get_object()
+
+        if article.ai_processing:
+            return Response({"status": "processing"})
+
+        if article.ai_error:
+            return Response({
+                "status": "failed",
+                "error": article.ai_error,
+                "error_code": article.ai_error_code or "unknown",
+            })
+
+        if article.ai_processed:
+            serializer = ArticleDetailSerializer(article)
+            return Response({
+                "status": "completed",
+                "article": serializer.data,
+            })
+
+        return Response({"status": "idle"})
 
 
 class SearchJobViewSet(

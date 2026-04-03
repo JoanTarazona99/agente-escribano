@@ -133,5 +133,13 @@
     "api_error": "Could not connect to the server. It may be starting up (~30 s on Render free tier).",
     "unknown_error": "Unknown error",
     "retry": "Retry"
+  },
+  "toast": {
+    "rate_limited": "AI model temporarily unavailable (rate limited). Try again in a few minutes.",
+    "auth_error": "Authentication error with the AI service. Check your API key in settings.",
+    "timeout": "Analysis took too long. Please try again later.",
+    "previous_error": "Previous error",
+    "analysis_queued": "Analysis queued…",
+    "analysis_processing": "Analyzing article…"
   }
 }

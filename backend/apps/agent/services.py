@@ -5,6 +5,10 @@ Uso:
     service = get_llm_service()  # Elige automáticamente según LLM_PROVIDER
     service.process_article(article)  # actualiza campos ai_* en el objeto
 
+Background task (django-q2):
+    from django_q.tasks import async_task
+    async_task("apps.agent.services.run_analysis", article.id)
+
 Mocking en tests:
     with unittest.mock.patch("apps.agent.services.ollama.Client") as mock_client:
         ...
@@ -287,3 +291,88 @@ class OllamaService:
         ])
 
         self.logger.info("Artículo ID=%s procesado correctamente.", article.pk)
+
+
+# ─── Background task function (django-q2) ────────────────────────────────────
+
+def run_analysis(article_id: int, force: bool = False) -> str:
+    """
+    Función ejecutable por django-q2 (async_task).
+    Obtiene el artículo, lo marca como en proceso, llama al servicio LLM
+    y guarda el resultado o error.
+
+    Args:
+        article_id: PK del artículo a analizar.
+        force: Si True, resetea campos IA previos antes de procesar.
+
+    Returns:
+        Mensaje de estado para el log de django-q.
+    """
+    from apps.articles.models import Article
+
+    try:
+        article = Article.objects.get(pk=article_id)
+    except Article.DoesNotExist:
+        logger.error("run_analysis: artículo %s no existe", article_id)
+        return f"Article {article_id} not found"
+
+    # Si force=true, resetear campos IA
+    if force:
+        logger.info("🔄 Re-análisis forzado (background) para artículo %s", article.pk)
+        for field in (
+            "title_es", "title_en", "title_ru",
+            "abstract_es", "abstract_en", "abstract_ru",
+            "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
+            "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
+        ):
+            setattr(article, field, "")
+        article.ai_processed = False
+
+    # Marcar como en proceso
+    article.ai_processing = True
+    article.ai_error = ""
+    article.ai_error_code = ""
+    article.save(update_fields=["ai_processing", "ai_error", "ai_error_code", "ai_processed"]
+                 + ([
+                     "title_es", "title_en", "title_ru",
+                     "abstract_es", "abstract_en", "abstract_ru",
+                     "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
+                     "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
+                 ] if force else []))
+
+    try:
+        service = get_llm_service()
+        service.process_article(article)
+        # process_article ya guarda ai_processed=True, pero asegurar ai_processing=False
+        article.ai_processing = False
+        article.ai_error = ""
+        article.ai_error_code = ""
+        article.save(update_fields=["ai_processing", "ai_error", "ai_error_code"])
+        logger.info("✅ Análisis background completado para artículo %s", article_id)
+        return f"Article {article_id} analyzed successfully"
+
+    except Exception as exc:
+        # Importar excepciones tipificadas solo si están disponibles
+        error_code = "unknown"
+        try:
+            from apps.agent.openrouter_service import OpenRouterError
+            if isinstance(exc, OpenRouterError):
+                error_code = exc.code
+        except ImportError:
+            pass
+
+        error_msg = str(exc)[:500]
+        logger.error(
+            "❌ Error en análisis background artículo %s [%s]: %s",
+            article_id, error_code, error_msg,
+        )
+
+        article.ai_processing = False
+        article.ai_error = error_msg
+        article.ai_error_code = error_code
+        try:
+            article.save(update_fields=["ai_processing", "ai_error", "ai_error_code"])
+        except Exception:
+            logger.exception("No se pudo guardar estado de error para artículo %s", article_id)
+
+        return f"Article {article_id} failed: [{error_code}] {error_msg[:100]}"

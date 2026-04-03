@@ -12,7 +12,7 @@ def make_ollama_response(text: str) -> dict:
 class TestOllamaService:
     def _make_service(self, mock_client):
         """Helper para instanciar OllamaService con cliente mockeado."""
-        with patch("apps.agent.services.ollama.Client", return_value=mock_client):
+        with patch("ollama.Client", return_value=mock_client):
             return OllamaService()
 
     def test_translate_to_es(self):
@@ -68,14 +68,19 @@ class TestOllamaService:
 
         mock_client = MagicMock()
         mock_client.chat.side_effect = [
-            make_ollama_response("Estudio de recombinación"),      # translate title ES
-            make_ollama_response("Étude de la recombinaison"),     # translate abstract ES
-            make_ollama_response("Water recombination study"),      # translate title EN (skipped, already en)
-            make_ollama_response("Summary of recombination."),     # summarize
-            make_ollama_response("1. TIPO: Experimental"),         # analyze
+            make_ollama_response("Estudio de recombinación"),      # translate abstract ES
+            make_ollama_response("Estudio título ES"),             # translate title ES
+            make_ollama_response("Исследование рекомбинации"),     # translate abstract RU
+            make_ollama_response("Исследование заголовок RU"),     # translate title RU
+            make_ollama_response("Summary of recombination."),     # summarize (ru)
+            make_ollama_response("1. TIPO: Experimental"),         # analyze (ru)
+            make_ollama_response("Resumen ES"),                    # translate summary to ES
+            make_ollama_response("Summary EN"),                    # translate summary to EN
+            make_ollama_response("Análisis ES"),                   # translate analysis to ES
+            make_ollama_response("Analysis EN"),                   # translate analysis to EN
         ]
 
-        with patch("apps.agent.services.ollama.Client", return_value=mock_client):
+        with patch("ollama.Client", return_value=mock_client):
             service = OllamaService()
             service.process_article(article)
 
@@ -93,7 +98,7 @@ class TestOllamaService:
         mock_client = MagicMock()
         mock_client.chat.side_effect = ConnectionError("Ollama unreachable")
 
-        with patch("apps.agent.services.ollama.Client", return_value=mock_client):
+        with patch("ollama.Client", return_value=mock_client):
             service = OllamaService()
             with pytest.raises(ConnectionError):
                 service.process_article(article)

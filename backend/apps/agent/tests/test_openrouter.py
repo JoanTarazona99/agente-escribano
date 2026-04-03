@@ -5,7 +5,15 @@ import httpx
 import pytest
 from unittest.mock import MagicMock, patch
 
-from apps.agent.openrouter_service import OpenRouterService
+from apps.agent.openrouter_service import (
+    OpenRouterService,
+    OpenRouterError,
+    RateLimitError,
+    AuthError,
+    ModelNotFoundError,
+    NoContentError,
+    DeadlineExceededError,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -90,7 +98,7 @@ class TestCallOpenRouter:
     @patch("apps.agent.openrouter_service.time.monotonic")
     @patch("apps.agent.openrouter_service.time.sleep")
     def test_returns_none_when_all_models_exhausted(self, mock_sleep, mock_monotonic):
-        """Si todos los modelos dan 429, retorna None."""
+        """Si todos los modelos dan 429, lanza RateLimitError."""
         service = _make_service()
         error_resp = _make_httpx_response({"error": "rate limited"}, status_code=429)
         mock_monotonic.return_value = 0.0
@@ -100,8 +108,8 @@ class TestCallOpenRouter:
             MockClient.return_value.__exit__ = MagicMock(return_value=False)
             MockClient.return_value.post.return_value = error_resp
 
-            result = service._call_openrouter("test prompt")
-            assert result is None
+            with pytest.raises(RateLimitError):
+                service._call_openrouter("test prompt")
 
     @patch("apps.agent.openrouter_service.time.monotonic")
     def test_returns_none_on_timeout_tries_next_model(self, mock_monotonic):
@@ -127,7 +135,7 @@ class TestCallOpenRouter:
             assert result == "Fallback"
 
     def test_raises_on_4xx_model_not_found(self):
-        """Errores 4xx (excepto 429) se propagan como RuntimeError."""
+        """404 se propaga como ModelNotFoundError."""
         service = _make_service()
         error_resp = _make_httpx_response(
             {"error": {"message": "No endpoints found for model"}}, status_code=404,
@@ -138,11 +146,11 @@ class TestCallOpenRouter:
             MockClient.return_value.__exit__ = MagicMock(return_value=False)
             MockClient.return_value.post.return_value = error_resp
 
-            with pytest.raises(RuntimeError, match="OpenRouter error 404"):
+            with pytest.raises(ModelNotFoundError):
                 service._call_openrouter("test prompt")
 
     def test_raises_on_401_invalid_key(self):
-        """401 se propaga como RuntimeError."""
+        """401 se propaga como AuthError."""
         service = _make_service()
         error_resp = _make_httpx_response(
             {"error": {"message": "Invalid credentials"}}, status_code=401,
@@ -153,10 +161,11 @@ class TestCallOpenRouter:
             MockClient.return_value.__exit__ = MagicMock(return_value=False)
             MockClient.return_value.post.return_value = error_resp
 
-            with pytest.raises(RuntimeError, match="OpenRouter error 401"):
+            with pytest.raises(AuthError):
                 service._call_openrouter("test prompt")
 
-    def test_returns_none_when_no_choices(self):
+    def test_raises_no_content_when_no_choices(self):
+        """Sin choices en todos los modelos lanza NoContentError."""
         service = _make_service()
         mock_resp = _make_httpx_response({"choices": []})
 
@@ -165,8 +174,8 @@ class TestCallOpenRouter:
             MockClient.return_value.__exit__ = MagicMock(return_value=False)
             MockClient.return_value.post.return_value = mock_resp
 
-            result = service._call_openrouter("test prompt")
-            assert result is None
+            with pytest.raises(NoContentError):
+                service._call_openrouter("test prompt")
 
 
 class TestCallOpenRouterJson:
@@ -388,7 +397,7 @@ class TestProcessArticle:
         assert article.ai_processed is False
 
     def test_raises_when_no_content_generated(self):
-        """Si todas las llamadas retornan None/vacio, NO marca ai_processed."""
+        """Si todas las llamadas retornan None/vacio, lanza NoContentError."""
         from apps.articles.models import Article
 
         article = Article.objects.create(
@@ -401,7 +410,7 @@ class TestProcessArticle:
         with patch.object(service, "_call_openrouter_json", return_value=None):
             with patch.object(service, "_translate", return_value=""):
                 with patch.object(service, "_call_openrouter", return_value=None):
-                    with pytest.raises(RuntimeError, match="no genero contenido"):
+                    with pytest.raises(NoContentError):
                         service.process_article(article)
 
         article.refresh_from_db()
@@ -505,3 +514,200 @@ class TestForceReanalysis:
         assert article.ai_summary == "New summary"
         assert article.ai_analysis == "New analysis"
         assert article.ai_summary_es == "Nuevo resumen"
+
+
+# ── Tests de deadline ────────────────────────────────────────────────
+
+
+class TestDeadline:
+    """Tests para el deadline global de _call_openrouter."""
+
+    @patch("apps.agent.openrouter_service.time.monotonic")
+    def test_raises_deadline_exceeded_when_time_runs_out(self, mock_monotonic):
+        """Si el deadline se alcanza antes de la llamada, lanza DeadlineExceededError."""
+        service = _make_service()
+        # Simular que el tiempo ya se pasó
+        mock_monotonic.side_effect = [0.0, 100.0]
+
+        with pytest.raises(DeadlineExceededError):
+            service._call_openrouter("test prompt")
+
+
+# ── Tests de run_analysis (background task) ─────────────────────────
+
+
+@pytest.mark.django_db
+class TestRunAnalysis:
+    """Tests para la función run_analysis (ejecutada por django-q2)."""
+
+    def test_marks_processing_then_completed(self):
+        from apps.articles.models import Article
+        from apps.agent.services import run_analysis
+
+        article = Article.objects.create(
+            title="Test BG",
+            abstract_original="Abstract for background test",
+            language_original="en",
+        )
+
+        batch_tr = {"title_es": "Test BG ES", "title_ru": "Test BG RU"}
+        sa = {"summary": "BG Summary", "analysis": "BG Analysis"}
+        sa_tr = {
+            "ai_summary_es": "Resumen BG",
+            "ai_summary_ru": "Rezyume BG",
+            "ai_analysis_es": "Análisis BG",
+            "ai_analysis_ru": "Analiz BG",
+        }
+
+        with patch.multiple(
+            "apps.agent.openrouter_service.settings",
+            OPENROUTER_API_KEY="test-key",
+            OPENROUTER_MODEL="test-model",
+            LLM_PROVIDER="openrouter",
+        ):
+            with patch(
+                "apps.agent.openrouter_service.OpenRouterService._call_openrouter_json",
+                side_effect=[batch_tr, sa, sa_tr],
+            ):
+                result = run_analysis(article.pk)
+
+        article.refresh_from_db()
+        assert article.ai_processed is True
+        assert article.ai_processing is False
+        assert article.ai_error == ""
+        assert "successfully" in result
+
+    def test_saves_error_on_failure(self):
+        from apps.articles.models import Article
+        from apps.agent.services import run_analysis
+
+        article = Article.objects.create(
+            title="Test Fail",
+            abstract_original="Abstract",
+            language_original="en",
+        )
+
+        with patch.multiple(
+            "apps.agent.openrouter_service.settings",
+            OPENROUTER_API_KEY="test-key",
+            OPENROUTER_MODEL="test-model",
+            LLM_PROVIDER="openrouter",
+        ):
+            with patch(
+                "apps.agent.openrouter_service.OpenRouterService._call_openrouter_json",
+                side_effect=RateLimitError("All models rate-limited"),
+            ):
+                result = run_analysis(article.pk)
+
+        article.refresh_from_db()
+        assert article.ai_processing is False
+        assert article.ai_error_code == "rate_limited"
+        assert "rate_limited" in result
+
+    def test_not_found_article(self):
+        from apps.agent.services import run_analysis
+        result = run_analysis(999999)
+        assert "not found" in result
+
+
+# ── Tests de endpoints analyze (202) y analyze-status ──────────────
+
+
+@pytest.mark.django_db
+class TestAnalyzeEndpoint:
+    """Tests para los endpoints de análisis async."""
+
+    def test_analyze_returns_202(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Test Async",
+            abstract_original="Abstract",
+            language_original="en",
+        )
+
+        with patch("django_q.tasks.async_task", return_value="fake-task-id"):
+            response = api_client.post(f"/api/articles/{article.pk}/analyze/")
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["status"] == "queued"
+        assert data["article_id"] == article.pk
+
+        # Article should now be marked as processing
+        article.refresh_from_db()
+        assert article.ai_processing is True
+
+    def test_analyze_returns_202_when_already_processing(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Already Processing",
+            abstract_original="Abstract",
+            language_original="en",
+            ai_processing=True,
+        )
+
+        response = api_client.post(f"/api/articles/{article.pk}/analyze/")
+        assert response.status_code == 202
+        assert response.json()["status"] == "processing"
+
+    def test_analyze_status_idle(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Idle",
+            abstract_original="Abstract",
+            language_original="en",
+        )
+
+        response = api_client.get(f"/api/articles/{article.pk}/analyze-status/")
+        assert response.status_code == 200
+        assert response.json()["status"] == "idle"
+
+    def test_analyze_status_completed(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Done",
+            abstract_original="Abstract",
+            language_original="en",
+            ai_processed=True,
+        )
+
+        response = api_client.get(f"/api/articles/{article.pk}/analyze-status/")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert "article" in data
+
+    def test_analyze_status_failed(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Failed",
+            abstract_original="Abstract",
+            language_original="en",
+            ai_error="Rate limited",
+            ai_error_code="rate_limited",
+        )
+
+        response = api_client.get(f"/api/articles/{article.pk}/analyze-status/")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "failed"
+        assert data["error_code"] == "rate_limited"
+
+    def test_analyze_status_processing(self, api_client):
+        from apps.articles.models import Article
+
+        article = Article.objects.create(
+            title="Processing",
+            abstract_original="Abstract",
+            language_original="en",
+            ai_processing=True,
+        )
+
+        response = api_client.get(f"/api/articles/{article.pk}/analyze-status/")
+        assert response.status_code == 200
+        assert response.json()["status"] == "processing"

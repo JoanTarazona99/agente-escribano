@@ -19,6 +19,9 @@ export interface Article {
   source_db: SourceDatabase;
   article_type: ArticleType;
   ai_processed: boolean;
+  ai_processing: boolean;
+  ai_error: string;
+  ai_error_code: string;
   language_original: string;
   created_at: string;
   // Campos solo en detalle
@@ -97,5 +100,16 @@ export interface NotebookListResponse {
   next: string | null;
   previous: string | null;
   results: Notebook[];
+}
+
+// ─── Analysis Status (polling) ────────────────────────────────────
+
+export type AnalysisStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface AnalyzeStatusResponse {
+  status: AnalysisStatus;
+  article?: Article;
+  error?: string;
+  error_code?: string;
 }
 

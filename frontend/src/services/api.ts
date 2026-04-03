@@ -12,6 +12,7 @@ import type {
   SearchRequest,
   Notebook,
   NotebookListResponse,
+  AnalyzeStatusResponse,
 } from "@/types";
 
 const api = axios.create({
@@ -66,16 +67,26 @@ export async function getArticle(id: number): Promise<Article> {
   return data;
 }
 
-/** Lanza el análisis IA de un artículo. Con force=true regenera campos existentes. */
-export async function analyzeArticle(id: number, force = false): Promise<Article> {
-  const { data } = await api.post<Article>(
+/** Lanza el análisis IA de un artículo (background). Con force=true regenera campos existentes.
+ *  Retorna 202 con { status, task_id, article_id }. */
+export async function analyzeArticle(
+  id: number,
+  force = false,
+): Promise<{ status: string; task_id?: string; article_id: number }> {
+  const { data } = await api.post<{ status: string; task_id?: string; article_id: number }>(
     `/articles/${id}/analyze/`,
     null,
     {
       params: force ? { force: "true" } : {},
-      timeout: 180_000, // 3 min — el LLM puede tardar con traducciones
+      timeout: 30_000, // Solo encola, no espera el resultado
     },
   );
+  return data;
+}
+
+/** Consulta el estado del análisis IA de un artículo (polling). */
+export async function getAnalyzeStatus(id: number): Promise<AnalyzeStatusResponse> {
+  const { data } = await api.get<AnalyzeStatusResponse>(`/articles/${id}/analyze-status/`);
   return data;
 }
 

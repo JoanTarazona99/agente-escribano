@@ -60,44 +60,32 @@ class TestArticleDetailAPI:
 
 @pytest.mark.django_db
 class TestArticleAnalyzeAPI:
-    def test_analyze_calls_llm_service(self, api_client, article_factory, mocker):
-        """El endpoint /analyze/ debe delegar al servicio LLM y devolver 200."""
+    def test_analyze_enqueues_task_returns_202(self, api_client, article_factory, mocker):
+        """El endpoint /analyze/ debe encolar una tarea y devolver 202."""
         article = article_factory()
-        mock_service = mocker.MagicMock()
-        mocker.patch(
-            "apps.agent.services.get_llm_service",
-            return_value=mock_service,
-        )
+        mocker.patch("django_q.tasks.async_task", return_value="fake-task-id")
         response = api_client.post(f"/api/articles/{article.pk}/analyze/")
-        assert response.status_code == status.HTTP_200_OK
-        mock_service.process_article.assert_called_once_with(article)
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        data = response.json()
+        assert data["status"] == "queued"
+        assert data["article_id"] == article.pk
 
-    def test_analyze_returns_500_on_llm_error(self, api_client, article_factory, mocker):
-        """Si el servicio LLM falla, devuelve 500."""
-        article = article_factory()
-        mock_service = mocker.MagicMock()
-        mock_service.process_article.side_effect = ConnectionError("LLM no disponible")
-        mocker.patch(
-            "apps.agent.services.get_llm_service",
-            return_value=mock_service,
-        )
+    def test_analyze_already_processing_returns_202(self, api_client, article_factory):
+        """Si ya está procesando, devuelve 202 con status=processing."""
+        article = article_factory(ai_processing=True)
         response = api_client.post(f"/api/articles/{article.pk}/analyze/")
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        assert response.json()["status"] == "processing"
 
     def test_analyze_force_resets_ai_fields(self, api_client, article_factory, mocker):
-        """force=true resetea campos IA antes de re-procesar."""
+        """force=true encola la tarea con force=True para resetear campos IA."""
         article = article_factory(
             ai_processed=True, ai_summary="Old", ai_analysis="Old",
         )
-        mock_service = mocker.MagicMock()
-        mocker.patch(
-            "apps.agent.services.get_llm_service",
-            return_value=mock_service,
-        )
+        mock_async = mocker.patch("django_q.tasks.async_task", return_value="fake-task-id")
         response = api_client.post(f"/api/articles/{article.pk}/analyze/?force=true")
-        assert response.status_code == status.HTTP_200_OK
-        # Verify the article was reset before process_article was called
-        call_args = mock_service.process_article.call_args[0][0]
-        assert call_args.ai_summary == ""
-        assert call_args.ai_analysis == ""
-        assert call_args.ai_processed is False
+        assert response.status_code == status.HTTP_202_ACCEPTED
+        # Verify force=True is passed to the background task
+        mock_async.assert_called_once()
+        args = mock_async.call_args
+        assert args[0][2] is True  # third positional arg is force=True

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type DragEvent, type ChangeEvent } from "react";
+import { useState, useEffect, useCallback, useRef, type DragEvent, type ChangeEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -10,10 +10,12 @@ import {
   getArticles,
   getArticle,
   analyzeArticle,
+  getAnalyzeStatus,
   startSearch,
   getJob,
 } from "@/services/api";
 import type { Article, ArticleFilters, SearchJob, SourceDatabase } from "@/types";
+import { useToast } from "@/components/Toast/ToastContext";
 import ProgressIndicator from "@/components/ProgressIndicator/ProgressIndicator";
 import ArticleCard from "@/components/ArticleCard/ArticleCard";
 import ArticleDetail from "@/pages/ArticleDetail";
@@ -166,15 +168,64 @@ export default function Notebook() {
     enabled: selectedArticleId !== null && selectedArticleId > 0,
   });
 
+  const toast = useToast();
+  const analyzeToastRef = useRef<string | null>(null);
+  const [analyzingArticleId, setAnalyzingArticleId] = useState<number | null>(null);
+
   const analyzeMutation = useMutation({
     mutationFn: (force: boolean) => analyzeArticle(selectedArticleId!, force),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["article", String(selectedArticleId)], data);
+    onSuccess: () => {
+      setAnalyzingArticleId(selectedArticleId);
+      analyzeToastRef.current = toast.loading(t("article.analyzing_bg"));
     },
     onError: (error: Error) => {
-      alert(t("article.analyze_error", { message: error.message }));
+      toast.error(t("article.analyze_error", { message: error.message }));
     },
   });
+
+  // ─── Polling analyze status ───
+  const { data: analyzeStatus } = useQuery({
+    queryKey: ["analyze-status", analyzingArticleId],
+    queryFn: () => getAnalyzeStatus(analyzingArticleId!),
+    enabled: analyzingArticleId !== null,
+    refetchInterval: (query) => {
+      const st = query.state.data?.status;
+      return st === "processing" || !st ? 3000 : false;
+    },
+  });
+
+  useEffect(() => {
+    if (!analyzeStatus || !analyzingArticleId) return;
+
+    if (analyzeStatus.status === "completed") {
+      // Dismiss loading toast and show success
+      if (analyzeToastRef.current) {
+        toast.update(analyzeToastRef.current, t("article.ai_processed_label"), "success", 4000);
+        analyzeToastRef.current = null;
+      }
+      // Update article data in cache
+      if (analyzeStatus.article) {
+        queryClient.setQueryData(["article", String(analyzingArticleId)], analyzeStatus.article);
+      }
+      queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
+      setAnalyzingArticleId(null);
+    } else if (analyzeStatus.status === "failed") {
+      const errorMsg = analyzeStatus.error_code === "rate_limited"
+        ? t("toast.rate_limited")
+        : analyzeStatus.error_code === "auth_error"
+          ? t("toast.auth_error")
+          : analyzeStatus.error_code === "timeout"
+            ? t("toast.timeout")
+            : t("article.analyze_error", { message: analyzeStatus.error || t("common.unknown_error") });
+      if (analyzeToastRef.current) {
+        toast.update(analyzeToastRef.current, errorMsg, "error", 8000);
+        analyzeToastRef.current = null;
+      }
+      // Refresh article to show error state
+      queryClient.invalidateQueries({ queryKey: ["article", String(analyzingArticleId)] });
+      setAnalyzingArticleId(null);
+    }
+  }, [analyzeStatus, analyzingArticleId, queryClient, notebookId, toast, t]);
 
   // ─── Mutations ───
   const updateMutation = useMutation({
@@ -557,29 +608,47 @@ export default function Notebook() {
                       {t("notebook.ai_tools")}
                     </h4>
 
+                    {/* Error badge from previous analysis */}
+                    {selectedArticle.ai_error && !selectedArticle.ai_processing && (
+                      <div className="nb-studio__error-badge" role="alert">
+                        <span>⚠️</span>
+                        <span>{t("toast.previous_error")}: {selectedArticle.ai_error.slice(0, 120)}</span>
+                      </div>
+                    )}
+
                     <button
                       className="nb-studio__action-btn"
                       onClick={() =>
                         analyzeMutation.mutate(!!selectedArticle.ai_processed)
                       }
-                      disabled={analyzeMutation.isPending}
+                      disabled={
+                        analyzeMutation.isPending ||
+                        selectedArticle.ai_processing ||
+                        analyzingArticleId === selectedArticle.id
+                      }
                     >
-                      <span className="nb-studio__action-icon">✨</span>
+                      {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id) ? (
+                        <span className="nb-studio__action-spinner" />
+                      ) : (
+                        <span className="nb-studio__action-icon">✨</span>
+                      )}
                       <span className="nb-studio__action-text">
-                        {analyzeMutation.isPending
+                        {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id)
                           ? t("article.analyzing")
-                          : selectedArticle.ai_processed
-                            ? t("article.reanalyze")
-                            : t("article.analyze")}
+                          : analyzeMutation.isPending
+                            ? t("article.analyzing")
+                            : selectedArticle.ai_processed
+                              ? t("article.reanalyze")
+                              : t("article.analyze")}
                       </span>
                       <span className="nb-studio__action-arrow">›</span>
                     </button>
 
-                    {analyzeMutation.isPending && (
+                    {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id) && (
                       <p className="nb-studio__pending">{t("article.analyzing_bg")}</p>
                     )}
 
-                    {selectedArticle.ai_processed && (
+                    {selectedArticle.ai_processed && !selectedArticle.ai_processing && (
                       <p className="nb-studio__done">✅ {t("article.ai_processed_label")}</p>
                     )}
                   </div>

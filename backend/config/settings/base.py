@@ -42,6 +42,7 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "corsheaders",
     "drf_spectacular",
+    "django_q",
 ]
 
 LOCAL_APPS = [
@@ -178,6 +179,21 @@ CORS_ALLOW_HEADERS = [
 CORS_PREFLIGHT_MAX_AGE = 3600
 
 
+# ─── django-q2 (background tasks) ─────────────────────────
+Q_CLUSTER = {
+    "name": "agente-escribano",
+    "workers": 2,
+    "timeout": 300,        # 5 min máximo por tarea
+    "retry": 360,          # reintentar a los 6 min si no terminó
+    "queue_limit": 50,
+    "bulk": 10,
+    "orm": "default",      # ORM broker — usa la BD existente (sin Redis)
+    "save_limit": 100,     # guardar últimas 100 tareas
+    "ack_failures": True,  # registrar fallos
+    "max_attempts": 1,     # no reintentar automáticamente (el usuario decide)
+    "catch_up": False,     # no ejecutar tareas perdidas al reiniciar
+}
+
 # ─── Ollama / LLM ────────────────────────────────────────
 # Proveedor de LLM a usar: 'ollama' (desarrollo local) o 'openrouter' (producción Render)
 LLM_PROVIDER = env("LLM_PROVIDER", default="ollama")
@@ -189,8 +205,8 @@ OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
 # Configuración de OpenRouter (producción Render)
 # Obtén tu API key en: https://openrouter.ai/workspaces/default/keys
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
-# Modelo de OpenRouter:  openrouter/auto | meta-llama/llama-3.3-70b-instruct:free | ...
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="meta-llama/llama-3.3-70b-instruct:free")
+# Modelo de OpenRouter:  openrouter/auto | google/gemma-3-12b-it:free | ...
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="google/gemma-3-12b-it:free")
 
 
 # ─── APIs académicas ─────────────────────────────────────

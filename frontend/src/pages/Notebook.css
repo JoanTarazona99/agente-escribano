@@ -963,3 +963,35 @@
     flex-direction: column;
   }
 }
+
+/* ─── Studio spinner & error badge ─── */
+
+.nb-studio__action-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: nb-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes nb-spin {
+  to { transform: rotate(360deg); }
+}
+
+.nb-studio__error-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  color: #dc2626;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  word-break: break-word;
+}

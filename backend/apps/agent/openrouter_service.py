@@ -21,20 +21,59 @@ from apps.articles.models import Article
 
 logger = logging.getLogger(__name__)
 
+
+# ── Excepciones tipificadas ──────────────────────────────────────────
+
+class OpenRouterError(Exception):
+    """Error base para llamadas a OpenRouter."""
+    code: str = "unknown"
+
+    def __init__(self, message: str, code: str | None = None):
+        self.message = message
+        if code:
+            self.code = code
+        super().__init__(message)
+
+
+class RateLimitError(OpenRouterError):
+    """Todos los modelos agotaron retries por rate-limiting (429)."""
+    code = "rate_limited"
+
+
+class AuthError(OpenRouterError):
+    """API key inválida o expirada (401/403)."""
+    code = "auth_error"
+
+
+class ModelNotFoundError(OpenRouterError):
+    """El modelo solicitado no existe en OpenRouter (404)."""
+    code = "model_unavailable"
+
+
+class NoContentError(OpenRouterError):
+    """El modelo no generó contenido útil (respuesta vacía recurrente)."""
+    code = "no_content"
+
+
+class DeadlineExceededError(OpenRouterError):
+    """Se superó el tiempo máximo total para la llamada."""
+    code = "timeout"
+
+
 # Campos que se actualizan al procesar un articulo.
 _AI_UPDATE_FIELDS = [
     "title_es", "title_en", "title_ru",
     "abstract_es", "abstract_en", "abstract_ru",
     "ai_summary", "ai_summary_es", "ai_summary_en", "ai_summary_ru",
     "ai_analysis", "ai_analysis_es", "ai_analysis_en", "ai_analysis_ru",
-    "ai_processed",
+    "ai_processed", "ai_processing", "ai_error", "ai_error_code",
 ]
 
 # Modelos gratuitos de fallback, ordenados por preferencia.
 # Si el modelo principal da 429, se prueban estos (maximo 2 para no exceder timeout).
 _FALLBACK_MODELS = [
-    "google/gemma-3-12b-it:free",
     "google/gemma-3-27b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
@@ -42,8 +81,9 @@ _MAX_RETRIES_PER_MODEL = 1
 # Espera entre reintentos (en segundos).
 _RETRY_DELAY = 2.0
 # Tiempo maximo total para _call_openrouter (segundos).
-# Debe ser < Gunicorn timeout (120s) / num_calls (3-6) para que quepa.
-_CALL_DEADLINE = 20.0
+# Con background tasks ya no hay restriccion de Gunicorn timeout, pero
+# mantenemos un deadline razonable por llamada individual.
+_CALL_DEADLINE = 25.0
 
 
 class OpenRouterService:
@@ -58,8 +98,8 @@ class OpenRouterService:
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        self.model = getattr(settings, "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
-        self.timeout = 30.0  # 30 segundos por llamada HTTP individual
+        self.model = getattr(settings, "OPENROUTER_MODEL", "google/gemma-3-12b-it:free")
+        self.timeout = 25.0  # Sincronizado con _CALL_DEADLINE
 
     # ================================================================
     # Punto de entrada principal
@@ -158,7 +198,7 @@ class OpenRouterService:
                     "modelo exista en https://openrouter.ai/models",
                     article.id, self.model,
                 )
-                raise RuntimeError(
+                raise NoContentError(
                     f"OpenRouter no genero contenido para articulo {article.id}. "
                     f"El modelo '{self.model}' puede no estar disponible. "
                     f"Consulta https://openrouter.ai/models"
@@ -344,6 +384,8 @@ class OpenRouterService:
         try:
             response = self._call_openrouter(prompt, max_tokens=300)
             return response.strip() if response else ""
+        except OpenRouterError:
+            raise  # Propagar errores tipificados
         except Exception as e:
             logger.error("Error en traduccion a %s: %s", target_lang, e)
             return ""
@@ -358,8 +400,12 @@ class OpenRouterService:
         """
         Llama a OpenRouter y parsea JSON de la respuesta.
         Maneja markdown code fences, texto extra, etc.
+        Retorna None si falla el parseo JSON (pero propaga OpenRouterError).
         """
-        raw = self._call_openrouter(prompt, max_tokens=max_tokens)
+        try:
+            raw = self._call_openrouter(prompt, max_tokens=max_tokens)
+        except OpenRouterError:
+            raise  # Propagar errores tipificados
         if not raw:
             return None
 
@@ -409,6 +455,7 @@ class OpenRouterService:
         }
 
         deadline = time.monotonic() + _CALL_DEADLINE
+        all_rate_limited = True
 
         for model in models_to_try:
             for attempt in range(_MAX_RETRIES_PER_MODEL + 1):
@@ -419,7 +466,9 @@ class OpenRouterService:
                         "Deadline alcanzado (%.0fs). Abortando.",
                         _CALL_DEADLINE,
                     )
-                    return None
+                    raise DeadlineExceededError(
+                        f"Deadline de {_CALL_DEADLINE}s alcanzado"
+                    )
 
                 payload = {
                     "model": model,
@@ -449,6 +498,7 @@ class OpenRouterService:
                         logger.warning(
                             "OpenRouter sin choices (%s): %s", model, data,
                         )
+                        all_rate_limited = False
                         break  # Probar siguiente modelo
 
                     content = (
@@ -460,6 +510,7 @@ class OpenRouterService:
                         logger.warning(
                             "OpenRouter content vacio (%s)", model,
                         )
+                        all_rate_limited = False
                         break  # Probar siguiente modelo
 
                     if model != self.model:
@@ -491,12 +542,24 @@ class OpenRouterService:
                     # 429 agotado retries -> probar siguiente modelo
                     if code == 429:
                         break
-                    # Otros 4xx (401, 403, 404) son fatales
+                    # 401/403 son fatales (auth)
+                    if code in (401, 403):
+                        raise AuthError(
+                            f"OpenRouter auth error {code}: {body[:200]}"
+                        ) from e
+                    # 404 modelo no encontrado
+                    if code == 404:
+                        raise ModelNotFoundError(
+                            f"Modelo no encontrado ({model}): {body[:200]}"
+                        ) from e
+                    # Otros 4xx son fatales
                     if 400 <= code < 500:
-                        raise RuntimeError(
-                            f"OpenRouter error {code}: {body[:200]}"
+                        raise OpenRouterError(
+                            f"OpenRouter error {code}: {body[:200]}",
+                            code="unknown",
                         ) from e
                     # 5xx -> probar siguiente modelo
+                    all_rate_limited = False
                     break
 
                 except httpx.TimeoutException:
@@ -504,6 +567,7 @@ class OpenRouterService:
                         "OpenRouter timeout (>%.0fs) con %s",
                         self.timeout, model,
                     )
+                    all_rate_limited = False
                     break  # Probar siguiente modelo
 
                 except Exception as e:
@@ -521,5 +585,13 @@ class OpenRouterService:
             "Todos los modelos agotados (%.0fs). Principal: %s",
             _CALL_DEADLINE, self.model,
         )
-        return None
+        if all_rate_limited:
+            raise RateLimitError(
+                f"Todos los modelos rate-limited ({_CALL_DEADLINE}s). "
+                f"Principal: {self.model}"
+            )
+        raise NoContentError(
+            f"Ningún modelo generó contenido ({_CALL_DEADLINE}s). "
+            f"Principal: {self.model}"
+        )
 

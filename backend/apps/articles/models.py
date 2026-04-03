@@ -120,6 +120,24 @@ class Article(models.Model):
         default=False,
         help_text="Indica si el artículo ha sido analizado por Ollama.",
     )
+    ai_processing = models.BooleanField(
+        _("Análisis en curso"),
+        default=False,
+        help_text="Indica que el artículo está siendo analizado en background.",
+    )
+    ai_error = models.TextField(
+        _("Último error de análisis IA"),
+        blank=True,
+        default="",
+        help_text="Mensaje del último error ocurrido durante el análisis IA.",
+    )
+    ai_error_code = models.CharField(
+        _("Código de error IA"),
+        max_length=30,
+        blank=True,
+        default="",
+        help_text="Código tipificado: rate_limited, auth_error, model_unavailable, timeout, no_content, unknown.",
+    )
 
     # ─── Timestamps ───────────────────────────────────────
     created_at = models.DateTimeField(_("Fecha de alta"), auto_now_add=True)
