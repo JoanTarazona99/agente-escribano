@@ -162,9 +162,10 @@ class ArticleViewSet(
         article = self.get_object()
 
         if article.ai_processing:
-            # Red de seguridad: si lleva >7 min en "processing",
+            # Red de seguridad: si lleva >20 min en "processing",
             # el worker murió sin limpiar. Auto-resetear.
-            stale_cutoff = timezone.now() - timedelta(minutes=7)
+            # (20 min tolera reintentos 429 legítimos hasta 10 min)
+            stale_cutoff = timezone.now() - timedelta(minutes=20)
             if article.updated_at < stale_cutoff:
                 logger.warning(
                     "Artículo %s atascado en ai_processing=True desde %s. Auto-reset.",
