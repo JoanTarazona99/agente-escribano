@@ -9,6 +9,9 @@ python manage.py collectstatic --noinput
 echo "==> Running migrations..."
 python manage.py migrate --noinput
 
+echo "==> Cleaning up stuck articles from previous deploy..."
+python manage.py cleanup_stuck_articles
+
 echo "==> Starting django-q2 worker (background)..."
 python manage.py qcluster &
 
