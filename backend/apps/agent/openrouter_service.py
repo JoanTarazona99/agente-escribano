@@ -368,7 +368,7 @@ class OpenRouterService:
             "- Return ONLY the JSON. No markdown code blocks. No extra text."
         )
 
-        data = self._call_openrouter_json(prompt, max_tokens=3000)
+        data = self._call_openrouter_json(prompt, max_tokens=4000)
         if data and any(
             data.get(k) for k in (
                 "summary_en", "summary_es", "summary_ru",
@@ -641,7 +641,16 @@ class OpenRouterService:
                         )
                         resp.raise_for_status()
 
-                    data = resp.json()
+                    try:
+                        data = resp.json()
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.warning(
+                            "OpenRouter resp.json() fallo con %s: %s. Body: %s",
+                            model, e, resp.text[:200],
+                        )
+                        all_rate_limited = False
+                        break  # probar siguiente modelo
+
                     if not data.get("choices"):
                         logger.warning(
                             "OpenRouter sin choices (%s): %s", model, data,
@@ -745,8 +754,20 @@ class OpenRouterService:
                     break  # Probar siguiente modelo
 
                 except Exception as e:
+                    err_str = str(e)
+                    # json.JSONDecodeError (truncado o mal formado) → no es fatal,
+                    # probar siguiente modelo en lugar de abortar todo el pipeline.
+                    if "Expecting value" in err_str or isinstance(e, (ValueError, json.JSONDecodeError)):
+                        logger.warning(
+                            "OpenRouter JSON parse error con %s (posible truncado), "
+                            "probando siguiente modelo: %s",
+                            model, err_str[:200],
+                        )
+                        all_rate_limited = False
+                        break  # saltar al siguiente modelo
+                    # Cualquier otro error sí es fatal
                     logger.error(
-                        "OpenRouter error con %s: %s", model, str(e)[:500],
+                        "OpenRouter error con %s: %s", model, err_str[:500],
                     )
                     raise
 
