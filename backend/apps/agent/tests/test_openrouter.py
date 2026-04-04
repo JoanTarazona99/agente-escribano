@@ -328,43 +328,36 @@ class TestGenerateSummaryAndAnalysis:
 
 
 class TestGenerateAndTranslateSA:
-    """Tests para _generate_and_translate_sa (mega-prompt 6 claves)."""
+    """Tests para _generate_and_translate_sa (2 llamadas: EN + traducir ES/RU)."""
 
-    def test_mega_prompt_success_returns_six_keys(self):
+    def test_two_calls_success_returns_six_keys(self):
         service = _make_service()
-        mega = {
-            "summary_en": "Summary EN",
-            "summary_es": "Resumen ES",
-            "summary_ru": "Rezyume RU",
-            "analysis_en": "Analysis EN",
-            "analysis_es": "Analisis ES",
-            "analysis_ru": "Analiz RU",
+        sa_json = {
+            "summary": "Summary EN",
+            "analysis": "Analysis EN",
         }
-        with patch.object(service, "_call_openrouter_json", return_value=mega):
-            result = service._generate_and_translate_sa("Title", "Abstract", "Authors")
-            assert result == mega
-
-    def test_falls_back_to_two_calls_on_json_failure(self):
-        """Si mega-prompt retorna None, degrada a _generate_sa + _batch_translate_sa."""
-        service = _make_service()
-
-        sa_json = {"summary": "English summary", "analysis": "English analysis"}
         sa_tr = {
             "ai_summary_es": "Resumen ES",
             "ai_summary_ru": "Rezyume RU",
             "ai_analysis_es": "Analisis ES",
             "ai_analysis_ru": "Analiz RU",
         }
-
         with patch.object(
             service, "_call_openrouter_json",
-            side_effect=[None, sa_json, sa_tr],
+            side_effect=[sa_json, sa_tr],
         ):
-            result = service._generate_and_translate_sa("Title", "Abstract", "Auth")
-            assert result["summary_en"] == "English summary"
-            assert result["analysis_en"] == "English analysis"
+            result = service._generate_and_translate_sa("Title", "Abstract", "Authors")
+            assert result["summary_en"] == "Summary EN"
+            assert result["analysis_en"] == "Analysis EN"
             assert result["summary_es"] == "Resumen ES"
             assert result["analysis_ru"] == "Analiz RU"
+
+    def test_returns_empty_on_first_call_failure(self):
+        """Si la primera llamada (generar EN) falla, retorna vacio."""
+        service = _make_service()
+        with patch.object(service, "_call_openrouter_json", return_value=None):
+            result = service._generate_and_translate_sa("Title", "Abstract", "Auth")
+            assert result == {}
 
     def test_returns_empty_when_no_abstract(self):
         service = _make_service()
@@ -397,19 +390,22 @@ class TestProcessArticle:
             "abstract_es": "Estudio de recombinacion",
             "abstract_ru": "Issledovanie recombinatsii",
         }
-        # Mock mega-prompt: generate + translate SA (call 2)
-        mega_sa = {
-            "summary_en": "This study investigates water dissociation...",
-            "summary_es": "Este estudio investiga...",
-            "summary_ru": "Eto issledovanie...",
-            "analysis_en": "1. TYPE: experimental\n2. METHODOLOGY: voltammetry",
-            "analysis_es": "1. TIPO: experimental",
-            "analysis_ru": "1. TIP: eksperimentalnyj",
+        # Mock generate EN (call 2)
+        sa_json = {
+            "summary": "This study investigates water dissociation...",
+            "analysis": "1. TYPE: experimental\n2. METHODOLOGY: voltammetry",
+        }
+        # Mock translate ES/RU (call 3)
+        sa_tr = {
+            "ai_summary_es": "Este estudio investiga...",
+            "ai_summary_ru": "Eto issledovanie...",
+            "ai_analysis_es": "1. TIPO: experimental",
+            "ai_analysis_ru": "1. TIP: eksperimentalnyj",
         }
 
         with patch.object(
             service, "_call_openrouter_json",
-            side_effect=[batch_tr, mega_sa],
+            side_effect=[batch_tr, sa_json, sa_tr],
         ):
             result = service.process_article(article)
 
@@ -507,19 +503,21 @@ class TestProcessArticle:
 
         service = _make_service()
 
-        # Mega-prompt should be called (missing _es/_ru for summary+analysis)
-        mega_sa = {
-            "summary_en": "Should be ignored (existing)",
-            "summary_es": "Resumen existente ES",
-            "summary_ru": "Sushchestvuyushchee rezyume",
-            "analysis_en": "Should be ignored (existing)",
-            "analysis_es": "Analisis existente ES",
-            "analysis_ru": "Sushchestvuyushchij analiz",
+        # Generate EN (missing _es/_ru for summary+analysis)
+        sa_json = {
+            "summary": "New summary EN",
+            "analysis": "New analysis EN",
+        }
+        sa_tr = {
+            "ai_summary_es": "Resumen existente ES",
+            "ai_summary_ru": "Sushchestvuyushchee rezyume",
+            "ai_analysis_es": "Analisis existente ES",
+            "ai_analysis_ru": "Sushchestvuyushchij analiz",
         }
 
         with patch.object(
             service, "_call_openrouter_json",
-            return_value=mega_sa,
+            side_effect=[sa_json, sa_tr],
         ):
             result = service.process_article(article)
 
@@ -567,18 +565,17 @@ class TestForceReanalysis:
 
         service = _make_service()
         batch_tr = {"title_es": "Nuevo", "title_ru": "Novyj"}
-        mega_sa = {
-            "summary_en": "New summary",
-            "summary_es": "Nuevo resumen",
-            "summary_ru": "Novoe rezyume",
-            "analysis_en": "New analysis",
-            "analysis_es": "Nuevo analisis",
-            "analysis_ru": "Novyj analiz",
+        sa_json = {"summary": "New summary", "analysis": "New analysis"}
+        sa_tr = {
+            "ai_summary_es": "Nuevo resumen",
+            "ai_summary_ru": "Novoe rezyume",
+            "ai_analysis_es": "Nuevo analisis",
+            "ai_analysis_ru": "Novyj analiz",
         }
 
         with patch.object(
             service, "_call_openrouter_json",
-            side_effect=[batch_tr, mega_sa],
+            side_effect=[batch_tr, sa_json, sa_tr],
         ):
             service.process_article(article)
 
@@ -625,13 +622,12 @@ class TestRunAnalysis:
         )
 
         batch_tr = {"title_es": "Test BG ES", "title_ru": "Test BG RU"}
-        mega_sa = {
-            "summary_en": "BG Summary",
-            "summary_es": "Resumen BG",
-            "summary_ru": "Rezyume BG",
-            "analysis_en": "BG Analysis",
-            "analysis_es": "Análisis BG",
-            "analysis_ru": "Analiz BG",
+        sa_json = {"summary": "BG Summary", "analysis": "BG Analysis"}
+        sa_tr = {
+            "ai_summary_es": "Resumen BG",
+            "ai_summary_ru": "Rezyume BG",
+            "ai_analysis_es": "Análisis BG",
+            "ai_analysis_ru": "Analiz BG",
         }
 
         with patch.multiple(
@@ -642,7 +638,7 @@ class TestRunAnalysis:
         ):
             with patch(
                 "apps.agent.openrouter_service.OpenRouterService._call_openrouter_json",
-                side_effect=[batch_tr, mega_sa],
+                side_effect=[batch_tr, sa_json, sa_tr],
             ):
                 result = run_analysis(article.pk)
 

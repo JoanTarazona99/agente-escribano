@@ -5,7 +5,7 @@ Alternativa a Ollama cuando se despliega en Render con plan gratuito.
 API: https://openrouter.ai/api/v1
 Documentacion: https://openrouter.ai/docs
 
-Optimizado: 2 llamadas API batch (en vez de 12 secuenciales).
+Optimizado: 2 llamadas API batch (15-20s cada una, 80s total << 300s timeout).
 Resiliente: retry con backoff en 429 + fallback a modelos alternativos.
 """
 import logging
@@ -96,8 +96,11 @@ class OpenRouterService:
     Servicio que usa OpenRouter API para analisis y resumen de articulos.
     Compatible con la misma interfaz que OllamaService.
 
-    Optimizado: 2 llamadas API (traducir + generar+traducir analisis).
-    Fallback: si el parseo JSON falla, usa llamadas individuales.
+    Pipeline: 3 llamadas JSON:
+    1. Traducir titulo + abstract a ES/EN/RU     (~20s, ~1200 tokens)
+    2. Generar summary + analysis en EN           (~35s, ~900 tokens)
+    3. Traducir summary + analysis a ES/RU        (~25s, ~1400 tokens)
+    Total: ~80s << 300s timeout django-q2
     """
 
     def __init__(self):
@@ -114,11 +117,10 @@ class OpenRouterService:
 
     def process_article(self, article: Article) -> dict:
         """
-        Procesa un articulo: traduce, resume y analiza con 2 llamadas batch.
-        Guarda campos actualizados directamente en la BD.
-
-        Llamada 1: traducir titulo + abstract a ES/EN/RU.
-        Llamada 2: generar resumen + analisis en EN y traducir a ES/RU.
+        Procesa un articulo con 3 llamadas batch:
+        Paso 1: traducir titulo + abstract a ES/EN/RU
+        Paso 2: generar resumen + analisis en EN
+        Paso 3: traducir resumen + analisis a ES/RU
 
         Args:
             article: Instancia de Article
@@ -158,7 +160,7 @@ class OpenRouterService:
                         setattr(article, key, val)
                         result[key] = val
 
-            # -- Paso 2: generar resumen + analisis EN/ES/RU (1 llamada) --
+            # -- Paso 2: generar resumen + analisis EN (1 llamada) --
             best_abstract = (
                 article.abstract_en
                 or article.abstract_original
@@ -294,11 +296,10 @@ class OpenRouterService:
         self, title: str, abstract: str, authors: str,
     ) -> dict:
         """
-        Mega-prompt: genera resumen + analisis en EN y traduce a ES/RU,
-        todo en 1 sola llamada API -> JSON con 6 claves.
-
-        Fallback: si el JSON falla, degrada a 2 llamadas separadas
-        (_generate_summary_and_analysis + _batch_translate_sa).
+        2 llamadas pequeñas en vez de 1 mega-prompt:
+        Llamada 1: Generar summary + analysis en EN (~900 tokens, ~35s)
+        Llamada 2: Traducir a ES + RU               (~1400 tokens, ~45s)
+        Total: ~80s << 300s timeout django-q2
 
         Returns:
             dict con claves: summary_en, summary_es, summary_ru,
@@ -307,59 +308,27 @@ class OpenRouterService:
         if not abstract or not abstract.strip():
             return {}
 
-        prompt = (
-            "Analyze this scientific article. Return ONLY a valid JSON "
-            "object with these 6 keys:\n\n"
-            '{"summary_en": "Concise summary in English (150-250 words) '
-            "covering: objectives, methodology, key findings, conclusions, "
-            "and relevance to water dissociation/recombination in "
-            'electromembrane systems.",\n'
-            '"summary_es": "Same summary translated to Spanish.",\n'
-            '"summary_ru": "Same summary translated to Russian.",\n'
-            '"analysis_en": "Structured analysis in English (200-350 words) '
-            "with sections: 1. TYPE (theoretical/experimental/review/mixed), "
-            "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
-            '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10.",\n'
-            '"analysis_es": "Same analysis translated to Spanish.",\n'
-            '"analysis_ru": "Same analysis translated to Russian."}\n\n'
-            f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
-            "Rules:\n"
-            "- Preserve LaTeX/math ($...$), chemical formulas, abbreviations\n"
-            "- Keep numbered sections and bullet points in all languages\n"
-            "- Return ONLY the JSON. No markdown code blocks. No extra text."
-        )
-
-        data = self._call_openrouter_json(prompt, max_tokens=1800)
-        if data and any(
-            data.get(k) for k in (
-                "summary_en", "summary_es", "summary_ru",
-                "analysis_en", "analysis_es", "analysis_ru",
-            )
-        ):
-            logger.info("Mega-prompt SA exitoso (6 claves)")
-            return data
-
-        # Fallback: 2 llamadas separadas (generar EN + traducir ES/RU)
-        logger.info("Mega-prompt SA fallo, degradando a 2 llamadas separadas")
         result: dict = {}
+
+        # Llamada 1: generar resumen + analisis en EN
         sa = self._generate_summary_and_analysis(title, abstract, authors)
         if sa.get("summary"):
             result["summary_en"] = sa["summary"]
         if sa.get("analysis"):
             result["analysis_en"] = sa["analysis"]
 
-        summary_en = result.get("summary_en", "")
-        analysis_en = result.get("analysis_en", "")
-        if summary_en or analysis_en:
-            sa_tr = self._batch_translate_sa(summary_en, analysis_en)
-            if sa_tr.get("ai_summary_es"):
-                result["summary_es"] = sa_tr["ai_summary_es"]
-            if sa_tr.get("ai_summary_ru"):
-                result["summary_ru"] = sa_tr["ai_summary_ru"]
-            if sa_tr.get("ai_analysis_es"):
-                result["analysis_es"] = sa_tr["ai_analysis_es"]
-            if sa_tr.get("ai_analysis_ru"):
-                result["analysis_ru"] = sa_tr["ai_analysis_ru"]
+        if not result:
+            return {}
+
+        # Llamada 2: traducir a ES + RU
+        sa_tr = self._batch_translate_sa(
+            result.get("summary_en", ""),
+            result.get("analysis_en", ""),
+        )
+        result["summary_es"] = sa_tr.get("ai_summary_es", "")
+        result["summary_ru"] = sa_tr.get("ai_summary_ru", "")
+        result["analysis_es"] = sa_tr.get("ai_analysis_es", "")
+        result["analysis_ru"] = sa_tr.get("ai_analysis_ru", "")
 
         return result
 
