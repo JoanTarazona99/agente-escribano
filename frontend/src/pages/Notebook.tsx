@@ -171,6 +171,8 @@ export default function Notebook() {
   const toast = useToast();
   const analyzeToastRef = useRef<string | null>(null);
   const [analyzingArticleId, setAnalyzingArticleId] = useState<number | null>(null);
+  const analyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startAnalyzeTimerRef = useRef<((articleId: number) => void) | null>(null);
 
   const analyzeMutation = useMutation({
     mutationFn: (force: boolean) => analyzeArticle(selectedArticleId!, force),
@@ -184,7 +186,7 @@ export default function Notebook() {
   });
 
   // ─── Polling analyze status ───
-  const ANALYZE_POLL_TIMEOUT = 120_000; // 2 min max polling
+  const ANALYZE_POLL_TIMEOUT = 300_000; // 5 min = mismo que django-q2 timeout
 
   const { data: analyzeStatus } = useQuery({
     queryKey: ["analyze-status", analyzingArticleId],
@@ -196,19 +198,65 @@ export default function Notebook() {
     },
   });
 
-  // Safety timer: stop polling after 2 minutes if analysis is stuck
+  // Timer recursivo: watchdog que se reinicia cada 5 min mientras ai_processing=true
+  // Borde 1: Si cambia de artículo, limpia el timer anterior
+  // Borde 2: Distingue "fallo de fetch" (transitorio) de "realmente no completado"
   useEffect(() => {
-    if (!analyzingArticleId) return;
-    const timer = setTimeout(() => {
-      if (analyzeToastRef.current) {
-        toast.update(analyzeToastRef.current, t("toast.timeout"), "error", 8000);
-        analyzeToastRef.current = null;
+    startAnalyzeTimerRef.current = (articleId: number) => {
+      if (analyzeTimerRef.current) {
+        clearTimeout(analyzeTimerRef.current);
       }
-      queryClient.invalidateQueries({ queryKey: ["article", String(analyzingArticleId)] });
-      setAnalyzingArticleId(null);
-    }, ANALYZE_POLL_TIMEOUT);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+      analyzeTimerRef.current = setTimeout(async () => {
+        try {
+          const response = await fetch(`/api/articles/${articleId}/`);
+
+          if (!response.ok) {
+            console.warn(`[AnalyzeTimer] HTTP ${response.status}, reintentando...`);
+            startAnalyzeTimerRef.current?.(articleId);
+            return;
+          }
+
+          const article = await response.json();
+
+          if (article.ai_processed) {
+            if (analyzeToastRef.current) {
+              toast.update(analyzeToastRef.current, t("article.ai_processed_label"), "success", 4000);
+              analyzeToastRef.current = null;
+            }
+            queryClient.setQueryData(["article", String(articleId)], article);
+            queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
+            setAnalyzingArticleId(null);
+          } else if (article.ai_processing) {
+            console.warn(`[AnalyzeTimer] Aún procesando artículo ${articleId}, reintentando en 5 min`);
+            startAnalyzeTimerRef.current?.(articleId);
+          } else {
+            if (analyzeToastRef.current) {
+              toast.update(analyzeToastRef.current, t("toast.timeout"), "error", 8000);
+              analyzeToastRef.current = null;
+            }
+            queryClient.invalidateQueries({ queryKey: ["article", String(articleId)] });
+            setAnalyzingArticleId(null);
+          }
+        } catch (err) {
+          console.warn("[AnalyzeTimer] Error de red, reintentando...", err);
+          startAnalyzeTimerRef.current?.(articleId);
+        }
+      }, ANALYZE_POLL_TIMEOUT);
+    };
+  });
+
+  // Iniciar timer cuando cambia de artículo
+  useEffect(() => {
+    if (analyzingArticleId) {
+      startAnalyzeTimerRef.current?.(analyzingArticleId);
+    }
+    return () => {
+      if (analyzeTimerRef.current) {
+        clearTimeout(analyzeTimerRef.current);
+        analyzeTimerRef.current = null;
+      }
+    };
   }, [analyzingArticleId]);
 
   useEffect(() => {
