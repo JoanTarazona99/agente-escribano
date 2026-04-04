@@ -5,7 +5,7 @@ Alternativa a Ollama cuando se despliega en Render con plan gratuito.
 API: https://openrouter.ai/api/v1
 Documentacion: https://openrouter.ai/docs
 
-Optimizado: 3 llamadas API batch (en vez de 12 secuenciales).
+Optimizado: 2 llamadas API batch (en vez de 12 secuenciales).
 Resiliente: retry con backoff en 429 + fallback a modelos alternativos.
 """
 import logging
@@ -74,8 +74,8 @@ _AI_UPDATE_FIELDS = [
 # Si el principal da 429/404, se prueban estos. Duplicados con
 # self.model se filtran automaticamente.
 _FALLBACK_MODELS = [
+    "qwen/qwen3.6-plus:free",
     "qwen/qwen3.6-plus-preview:free",
-    "google/gemma-3-27b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
 ]
@@ -85,10 +85,10 @@ _MAX_RETRIES_PER_MODEL = 2
 # Base para backoff exponencial: delay = base * 2^attempt (2s, 4s).
 _RETRY_BASE_DELAY = 2.0
 # Tiempo maximo total para _call_openrouter (segundos).
-# Con 3 batch calls secuenciales, el peor caso es 60 x 3 = 180s,
-# que deja margen frente al timeout de django-q2 (300s) para
-# que el except pueda limpiar la BD antes del kill.
-_CALL_DEADLINE = 60.0
+# Con 2 batch calls secuenciales: mega-prompt ~50s + batch_translate ~50s = 100s,
+# que deja margen frente al timeout de django-q2 (300s) para que el except
+# pueda limpiar la BD antes del kill.
+_CALL_DEADLINE = 120.0
 
 
 class OpenRouterService:
@@ -96,7 +96,7 @@ class OpenRouterService:
     Servicio que usa OpenRouter API para analisis y resumen de articulos.
     Compatible con la misma interfaz que OllamaService.
 
-    Optimizado: 3 llamadas API batch con respuesta JSON en vez de 12.
+    Optimizado: 2 llamadas API (traducir + generar+traducir analisis).
     Fallback: si el parseo JSON falla, usa llamadas individuales.
     """
 
@@ -105,8 +105,8 @@ class OpenRouterService:
         self.base_url = "https://openrouter.ai/api/v1"
         self.model = getattr(settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free")
         # Timeout explicito por fase para evitar hang en lectura SSL stream.
-        # connect=10s, read=25s (la fase que colgaba), write=10s, pool=5s.
-        self.timeout = httpx.Timeout(connect=10.0, read=25.0, write=10.0, pool=5.0)
+        # connect=10s, read=50s (permite mega-prompt lento), write=10s, pool=5s.
+        self.timeout = httpx.Timeout(connect=10.0, read=50.0, write=10.0, pool=5.0)
 
     # ================================================================
     # Punto de entrada principal
@@ -114,8 +114,11 @@ class OpenRouterService:
 
     def process_article(self, article: Article) -> dict:
         """
-        Procesa un articulo: traduce, resume y analiza con 3 llamadas batch.
+        Procesa un articulo: traduce, resume y analiza con 2 llamadas batch.
         Guarda campos actualizados directamente en la BD.
+
+        Llamada 1: traducir titulo + abstract a ES/EN/RU.
+        Llamada 2: generar resumen + analisis en EN y traducir a ES/RU.
 
         Args:
             article: Instancia de Article
@@ -155,7 +158,7 @@ class OpenRouterService:
                         setattr(article, key, val)
                         result[key] = val
 
-            # -- Paso 2: generar resumen + analisis en ingles (1 llamada) --
+            # -- Paso 2: generar resumen + analisis EN/ES/RU (1 llamada) --
             best_abstract = (
                 article.abstract_en
                 or article.abstract_original
@@ -163,40 +166,33 @@ class OpenRouterService:
             )
             authors = article.authors[:200] if article.authors else "Unknown"
 
-            if not article.ai_summary or not article.ai_analysis:
-                sa = self._generate_summary_and_analysis(
+            need_sa = (
+                not article.ai_summary
+                or not article.ai_analysis
+                or not article.ai_summary_es
+                or not article.ai_summary_ru
+                or not article.ai_analysis_es
+                or not article.ai_analysis_ru
+            )
+            if need_sa:
+                sa = self._generate_and_translate_sa(
                     article.title, best_abstract, authors,
                 )
-                if sa.get("summary") and not article.ai_summary:
-                    article.ai_summary = sa["summary"]
-                    article.ai_summary_en = sa["summary"]
-                    result["ai_summary"] = sa["summary"]
-                if sa.get("analysis") and not article.ai_analysis:
-                    article.ai_analysis = sa["analysis"]
-                    article.ai_analysis_en = sa["analysis"]
-                    result["ai_analysis"] = sa["analysis"]
-
-            # -- Paso 3: traducir resumen + analisis a ES/RU (1 llamada) --
-            need_sa_tr = (
-                (article.ai_summary and (
-                    not article.ai_summary_es or not article.ai_summary_ru
-                ))
-                or (article.ai_analysis and (
-                    not article.ai_analysis_es or not article.ai_analysis_ru
-                ))
-            )
-            if need_sa_tr:
-                sa_tr = self._batch_translate_sa(
-                    article.ai_summary, article.ai_analysis,
-                )
-                for key in (
-                    "ai_summary_es", "ai_summary_ru",
-                    "ai_analysis_es", "ai_analysis_ru",
-                ):
-                    val = sa_tr.get(key)
-                    if val and not getattr(article, key):
-                        setattr(article, key, val)
-                        result[key] = val
+                sa_field_map = {
+                    "summary_en": ("ai_summary", "ai_summary_en"),
+                    "summary_es": ("ai_summary_es",),
+                    "summary_ru": ("ai_summary_ru",),
+                    "analysis_en": ("ai_analysis", "ai_analysis_en"),
+                    "analysis_es": ("ai_analysis_es",),
+                    "analysis_ru": ("ai_analysis_ru",),
+                }
+                for src_key, dest_fields in sa_field_map.items():
+                    val = sa.get(src_key)
+                    if val:
+                        for dest in dest_fields:
+                            if not getattr(article, dest):
+                                setattr(article, dest, val)
+                                result[dest] = val
 
             if not result:
                 logger.error(
@@ -245,7 +241,7 @@ class OpenRouterService:
             raise
 
     # ================================================================
-    # Batch methods  (1 API call each)
+    # Batch methods
     # ================================================================
 
     def _batch_translate(
@@ -279,7 +275,7 @@ class OpenRouterService:
             "- Return ONLY the JSON, no markdown, no explanation"
         )
 
-        data = self._call_openrouter_json(prompt, max_tokens=1500)
+        data = self._call_openrouter_json(prompt, max_tokens=1200)
         if data:
             return data
 
@@ -292,6 +288,79 @@ class OpenRouterService:
         if abstract:
             for l in targets:
                 result[f"abstract_{l}"] = self._translate(abstract, l)
+        return result
+
+    def _generate_and_translate_sa(
+        self, title: str, abstract: str, authors: str,
+    ) -> dict:
+        """
+        Mega-prompt: genera resumen + analisis en EN y traduce a ES/RU,
+        todo en 1 sola llamada API -> JSON con 6 claves.
+
+        Fallback: si el JSON falla, degrada a 2 llamadas separadas
+        (_generate_summary_and_analysis + _batch_translate_sa).
+
+        Returns:
+            dict con claves: summary_en, summary_es, summary_ru,
+                             analysis_en, analysis_es, analysis_ru.
+        """
+        if not abstract or not abstract.strip():
+            return {}
+
+        prompt = (
+            "Analyze this scientific article. Return ONLY a valid JSON "
+            "object with these 6 keys:\n\n"
+            '{"summary_en": "Concise summary in English (150-250 words) '
+            "covering: objectives, methodology, key findings, conclusions, "
+            "and relevance to water dissociation/recombination in "
+            'electromembrane systems.",\n'
+            '"summary_es": "Same summary translated to Spanish.",\n'
+            '"summary_ru": "Same summary translated to Russian.",\n'
+            '"analysis_en": "Structured analysis in English (200-350 words) '
+            "with sections: 1. TYPE (theoretical/experimental/review/mixed), "
+            "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
+            '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10.",\n'
+            '"analysis_es": "Same analysis translated to Spanish.",\n'
+            '"analysis_ru": "Same analysis translated to Russian."}\n\n'
+            f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
+            "Rules:\n"
+            "- Preserve LaTeX/math ($...$), chemical formulas, abbreviations\n"
+            "- Keep numbered sections and bullet points in all languages\n"
+            "- Return ONLY the JSON. No markdown code blocks. No extra text."
+        )
+
+        data = self._call_openrouter_json(prompt, max_tokens=1800)
+        if data and any(
+            data.get(k) for k in (
+                "summary_en", "summary_es", "summary_ru",
+                "analysis_en", "analysis_es", "analysis_ru",
+            )
+        ):
+            logger.info("Mega-prompt SA exitoso (6 claves)")
+            return data
+
+        # Fallback: 2 llamadas separadas (generar EN + traducir ES/RU)
+        logger.info("Mega-prompt SA fallo, degradando a 2 llamadas separadas")
+        result: dict = {}
+        sa = self._generate_summary_and_analysis(title, abstract, authors)
+        if sa.get("summary"):
+            result["summary_en"] = sa["summary"]
+        if sa.get("analysis"):
+            result["analysis_en"] = sa["analysis"]
+
+        summary_en = result.get("summary_en", "")
+        analysis_en = result.get("analysis_en", "")
+        if summary_en or analysis_en:
+            sa_tr = self._batch_translate_sa(summary_en, analysis_en)
+            if sa_tr.get("ai_summary_es"):
+                result["summary_es"] = sa_tr["ai_summary_es"]
+            if sa_tr.get("ai_summary_ru"):
+                result["summary_ru"] = sa_tr["ai_summary_ru"]
+            if sa_tr.get("ai_analysis_es"):
+                result["analysis_es"] = sa_tr["ai_analysis_es"]
+            if sa_tr.get("ai_analysis_ru"):
+                result["analysis_ru"] = sa_tr["ai_analysis_ru"]
+
         return result
 
     def _generate_summary_and_analysis(
@@ -436,13 +505,12 @@ class OpenRouterService:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # Intentar extraer JSON de texto circundante
-            match = re.search(
-                r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL,
-            )
-            if match:
+            # Intentar extraer JSON de texto circundante: desde primera { hasta ultima }
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
                 try:
-                    return json.loads(match.group())
+                    return json.loads(text[start:end+1])
                 except json.JSONDecodeError:
                     pass
             logger.warning(
