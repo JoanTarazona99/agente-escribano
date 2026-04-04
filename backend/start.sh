@@ -10,7 +10,7 @@ echo "==> Running migrations..."
 python manage.py migrate --noinput
 
 echo "==> Cleaning up stuck articles from previous deploy..."
-python manage.py cleanup_stuck_articles
+python manage.py cleanup_stuck_articles --minutes=0
 
 echo "==> Starting django-q2 worker (background)..."
 python manage.py qcluster &
