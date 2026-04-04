@@ -440,7 +440,7 @@ class OpenRouterService:
             "- Return ONLY the JSON, no markdown, no explanation"
         )
 
-        data = self._call_openrouter_json(prompt, max_tokens=2000)
+        data = self._call_openrouter_json(prompt, max_tokens=1400)
         if data:
             return data
 
