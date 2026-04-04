@@ -5,8 +5,19 @@ Alternativa a Ollama cuando se despliega en Render con plan gratuito.
 API: https://openrouter.ai/api/v1
 Documentacion: https://openrouter.ai/docs
 
-Optimizado: 2 llamadas API batch (15-20s cada una, 80s total << 300s timeout).
-Resiliente: retry con backoff en 429 + fallback a modelos alternativos.
+Optimizado: 2 llamadas API batch con mega-prompt (20s + 50s = 70s << 300s timeout).
+
+Resilencia en free tier:
+  - Modelo principal: google/gemma-3-27b-it:free (más estable)
+  - Fallbacks: Llama (estable) → Qwen (prone a 429) → Nvidia
+  - Retry: 2 reintentos en 429 con backoff: 1.5s, 3s, 6s
+  - Premium fallback: modelo no-free opcional (openai/gpt-4, anthropic/claude) si configurado
+  - Timeout explícito: connect=10s, read=50s, write=10s, pool=5s
+  - Deadline global: 120s
+
+Configuración (.env):
+  OPENROUTER_MODEL=google/gemma-3-27b-it:free  (defecto)
+  OPENROUTER_MODEL_PREMIUM=  (opcional, ej: openai/gpt-4-turbo)
 """
 import logging
 import json
@@ -73,19 +84,22 @@ _AI_UPDATE_FIELDS = [
 # Whitelist estricta: solo slugs :free verificados en OpenRouter.
 # Si el principal da 429/404, se prueban estos. Duplicados con
 # self.model se filtran automaticamente.
+# Orden: primero Llama (mas estable), luego Qwen (frecuente 429), Nvidia.
 _FALLBACK_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
     "qwen/qwen3.6-plus:free",
     "qwen/qwen3.6-plus-preview:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
+# 2 reintentos = 3 intentos totales (1 original + 2 retries con backoff exponencial).
 _MAX_RETRIES_PER_MODEL = 2
-# Base para backoff exponencial: delay = base * 2^attempt (2s, 4s).
-_RETRY_BASE_DELAY = 2.0
+# Base para backoff exponencial: delay = base * 2^attempt
+# Ejemplo: 1.5s, 3s, 6s. Mantenemos corto para no agravar deadline global.
+_RETRY_BASE_DELAY = 1.5
 # Tiempo maximo total para _call_openrouter (segundos).
-# Con 2 batch calls secuenciales: mega-prompt ~50s + batch_translate ~50s = 100s,
+# Con 2 batch calls secuenciales: batch_translate ~20s + mega-prompt ~50s = 70s,
 # que deja margen frente al timeout de django-q2 (300s) para que el except
 # pueda limpiar la BD antes del kill.
 _CALL_DEADLINE = 120.0
@@ -96,17 +110,36 @@ class OpenRouterService:
     Servicio que usa OpenRouter API para analisis y resumen de articulos.
     Compatible con la misma interfaz que OllamaService.
 
-    Pipeline: 3 llamadas JSON:
-    1. Traducir titulo + abstract a ES/EN/RU     (~20s, ~1200 tokens)
-    2. Generar summary + analysis en EN           (~35s, ~900 tokens)
-    3. Traducir summary + analysis a ES/RU        (~25s, ~1400 tokens)
-    Total: ~80s << 300s timeout django-q2
+    Pipeline: 2 llamadas JSON:
+    1. Traducir titulo + abstract a ES/EN/RU         (~20s, ~1200 tokens)
+    2. Generar summary + analysis EN + traducir ES/RU (~50s, ~3000 tokens)
+    Total: ~70s << 300s timeout django-q2
+
+    Resilencia:
+    - Modelo principal: google/gemma-3-27b-it:free (mas estable)
+    - Fallbacks: Llama, Qwen, Nvidia (ordenados por estabilidad)
+    - Retry con backoff corto: 1.5s, 3s, 6s en 429 (rate-limited)
+    - Timeout explicito por fase HTTP (connect/read/write/pool)
     """
 
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        self.model = getattr(settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free")
+        # Modelo principal: google/gemma-3-27b-it:free (mas estable en free tier).
+        # Fallbacks: Llama, Qwen, Nvidia (en orden de estabilidad percibida).
+        # Premium fallback (opcional): modelo no-free si está configurado.
+        self.model = getattr(
+            settings, "OPENROUTER_MODEL", "google/gemma-3-27b-it:free"
+        )
+        
+        # Construir lista de fallbacks: gratuitos + premium opcional como último recurso
+        fallback_models = list(_FALLBACK_MODELS)
+        premium = getattr(settings, "OPENROUTER_MODEL_PREMIUM", "")
+        if premium:
+            fallback_models.append(premium)
+            logger.info("Modelo premium activado como último fallback: %s", premium)
+        self._fallback_models = fallback_models
+        
         # Timeout explicito por fase para evitar hang en lectura SSL stream.
         # connect=10s, read=50s (permite mega-prompt lento), write=10s, pool=5s.
         self.timeout = httpx.Timeout(connect=10.0, read=50.0, write=10.0, pool=5.0)
@@ -542,12 +575,12 @@ class OpenRouterService:
         Llamada generica a OpenRouter API con retry y fallback de modelos.
 
         Estrategia:
-        1. Intenta con self.model (1 retry en 429).
-        2. Si falla, prueba cada modelo en _FALLBACK_MODELS.
+        1. Intenta con self.model (2 reintentos en 429 con backoff 1.5s, 3s).
+        2. Si falla, prueba cada modelo en self._fallback_models (incluye premium sii configurado).
         3. Respeta _CALL_DEADLINE total para no exceder Gunicorn timeout.
         """
         models_to_try = [self.model] + [
-            m for m in _FALLBACK_MODELS if m != self.model
+            m for m in self._fallback_models if m != self.model
         ]
 
         headers = {

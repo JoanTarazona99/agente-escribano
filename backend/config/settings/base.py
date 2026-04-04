@@ -205,8 +205,13 @@ OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
 # Configuración de OpenRouter (producción Render)
 # Obtén tu API key en: https://openrouter.ai/workspaces/default/keys
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
-# Modelo de OpenRouter:  qwen/qwen3.6-plus:free | google/gemma-3-27b-it:free | ...
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="qwen/qwen3.6-plus:free")
+# Modelo principal: google/gemma-3-27b-it:free (estable en free tier)
+# Alternativas: qwen/qwen3.6-plus:free | meta-llama/llama-3.3-70b-instruct:free
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="google/gemma-3-27b-it:free")
+# Modelo premium opcional (no-free) como último fallback.
+# Ej: openai/gpt-4-turbo | anthropic/claude-3-sonnet:beta
+# Vacío = solo use fallbacks gratuitos.
+OPENROUTER_MODEL_PREMIUM = env("OPENROUTER_MODEL_PREMIUM", default="")
 
 
 # ─── APIs académicas ─────────────────────────────────────

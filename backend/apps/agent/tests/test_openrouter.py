@@ -542,12 +542,13 @@ class TestProcessArticle:
 
         article.refresh_from_db()
         assert article.ai_processed is True
-        # Title/abstract translations were preserved
+        # Title/abstract translations were preserved (no batch_tr called since already exist)
         assert article.title_es == "Ya traducido"
-        # Existing summary preserved
+        # Existing summary preserved (not overwritten)
         assert article.ai_summary == "Existing summary"
-        # New SA translations applied
-        assert article.ai_summary_es == "Resumen existente ES"
+        # New SA translations applied (were empty before)
+        assert article.ai_summary_es == "Resumen nuevo ES"
+        assert article.ai_summary_ru == "Novoe rezyume RU"
 
 
 @pytest.mark.django_db
@@ -584,17 +585,18 @@ class TestForceReanalysis:
 
         service = _make_service()
         batch_tr = {"title_es": "Nuevo", "title_ru": "Novyj"}
-        sa_json = {"summary": "New summary", "analysis": "New analysis"}
-        sa_tr = {
-            "ai_summary_es": "Nuevo resumen",
-            "ai_summary_ru": "Novoe rezyume",
-            "ai_analysis_es": "Nuevo analisis",
-            "ai_analysis_ru": "Novyj analiz",
+        mega_sa = {
+            "summary_en": "New summary",
+            "summary_es": "Nuevo resumen",
+            "summary_ru": "Novoe rezyume",
+            "analysis_en": "New analysis",
+            "analysis_es": "Nuevo analisis",
+            "analysis_ru": "Novyj analiz",
         }
 
         with patch.object(
             service, "_call_openrouter_json",
-            side_effect=[batch_tr, sa_json, sa_tr],
+            side_effect=[batch_tr, mega_sa],
         ):
             service.process_article(article)
 
