@@ -7,16 +7,18 @@ Documentacion: https://openrouter.ai/docs
 
 Optimizado: 2 llamadas API batch con mega-prompt (20s + 50s = 70s << 300s timeout).
 
-Resilencia en free tier:
-  - Modelo principal: google/gemma-3-27b-it:free (más estable)
-  - Fallbacks: Llama (estable) → Qwen (prone a 429) → Nvidia
+Resilencia en free tier (basado en datos reales, Abril 2026):
+  - Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, 34 requests OK)
+  - Fallbacks: qwen2.5 → deepseek-r1 → llama → gemma → nvidia
+  - Problema: gemma/llama comparten pools globales, 429 frecuente (upstream OpenRouter)
+  - Nota: los 429 son pool-wide, NO de tu cuenta — todos los usuarios afectados
   - Retry: 2 reintentos en 429 con backoff: 1.5s, 3s, 6s
-  - Premium fallback: modelo no-free opcional (openai/gpt-4, anthropic/claude) si configurado
+  - Premium fallback: modelo no-free opcional si configurado
   - Timeout explícito: connect=10s, read=50s, write=10s, pool=5s
   - Deadline global: 120s
 
 Configuración (.env):
-  OPENROUTER_MODEL=google/gemma-3-27b-it:free  (defecto)
+  OPENROUTER_MODEL=qwen/qwen3.6-plus:free  (defecto — MÁS estable)
   OPENROUTER_MODEL_PREMIUM=  (opcional, ej: openai/gpt-4-turbo)
 """
 import logging
@@ -80,16 +82,17 @@ _AI_UPDATE_FIELDS = [
     "ai_processed", "ai_processing", "ai_error", "ai_error_code",
 ]
 
-# Modelos gratuitos de fallback, ordenados por preferencia.
+# Modelos gratuitos de fallback, ordenados por estabilidad REAL observada (Abril 2026).
 # Whitelist estricta: solo slugs :free verificados en OpenRouter.
-# Si el principal da 429/404, se prueban estos. Duplicados con
-# self.model se filtran automaticamente.
-# Orden: primero Llama (mas estable), luego Qwen (frecuente 429), Nvidia.
+# Orden actualizado por datos: Qwen es el más estable (34 requests exitosos),
+# Gemma/Llama con 429 frecuente. DeepSeek muy capaz. Nvidia como último recurso.
 _FALLBACK_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3.6-plus:free",
-    "qwen/qwen3.6-plus-preview:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
+    "qwen/qwen3.6-plus:free",                         # 1º más estable (34 requests OK)
+    "qwen/qwen2.5-72b-instruct:free",                 # 2º alternativa Qwen
+    "deepseek/deepseek-r1:free",                      # 3º muy capaz
+    "meta-llama/llama-3.3-70b-instruct:free",         # 4º (429 frecuente)
+    "google/gemma-3-27b-it:free",                     # 5º (429 frecuente)
+    "nvidia/nemotron-3-super-120b-a12b:free",        # 6º último recurso
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
@@ -115,21 +118,22 @@ class OpenRouterService:
     2. Generar summary + analysis EN + traducir ES/RU (~50s, ~3000 tokens)
     Total: ~70s << 300s timeout django-q2
 
-    Resilencia:
-    - Modelo principal: google/gemma-3-27b-it:free (mas estable)
-    - Fallbacks: Llama, Qwen, Nvidia (ordenados por estabilidad)
-    - Retry con backoff corto: 1.5s, 3s, 6s en 429 (rate-limited)
-    - Timeout explicito por fase HTTP (connect/read/write/pool)
+    Resilencia (datos reales Abril 2026):
+    - Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, 34 requests OK)
+    - Fallbacks: qwen2.5 → deepseek-r1 → llama → gemma → nvidia
+    - Pool rate-limit: gemma/llama (429 upstream) vs Qwen (stable)
+    - Retry con backoff corto: 1.5s, 3s, 6s en 429
+    - Timeout explicito por fase HTTP
     """
 
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        # Modelo principal: google/gemma-3-27b-it:free (mas estable en free tier).
-        # Fallbacks: Llama, Qwen, Nvidia (en orden de estabilidad percibida).
+        # Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, datos reales: 34 requests OK).
+        # Gemma/Llama dan 429 frecuentemente. DeepSeek en fallbacks como alternativa capaz.
         # Premium fallback (opcional): modelo no-free si está configurado.
         self.model = getattr(
-            settings, "OPENROUTER_MODEL", "google/gemma-3-27b-it:free"
+            settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free"
         )
         
         # Construir lista de fallbacks: gratuitos + premium opcional como último recurso
