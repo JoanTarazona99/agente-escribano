@@ -296,10 +296,11 @@ class OpenRouterService:
         self, title: str, abstract: str, authors: str,
     ) -> dict:
         """
-        2 llamadas pequeñas en vez de 1 mega-prompt:
-        Llamada 1: Generar summary + analysis en EN (~900 tokens, ~35s)
-        Llamada 2: Traducir a ES + RU               (~1400 tokens, ~45s)
-        Total: ~80s << 300s timeout django-q2
+        Mega-prompt: genera resumen + analisis en EN y traduce a ES/RU,
+        todo en 1 sola llamada API -> JSON con 6 claves.
+
+        Fallback: si el JSON falla, degrada a 2 llamadas separadas
+        (_generate_summary_and_analysis + _batch_translate_sa).
 
         Returns:
             dict con claves: summary_en, summary_es, summary_ru,
@@ -308,27 +309,59 @@ class OpenRouterService:
         if not abstract or not abstract.strip():
             return {}
 
-        result: dict = {}
+        prompt = (
+            "Analyze this scientific article. Return ONLY a valid JSON "
+            "object with these 6 keys:\n\n"
+            '{"summary_en": "Concise summary in English (150-250 words) '
+            "covering: objectives, methodology, key findings, conclusions, "
+            "and relevance to water dissociation/recombination in "
+            'electromembrane systems.",\n'
+            '"summary_es": "Same summary translated to Spanish.",\n'
+            '"summary_ru": "Same summary translated to Russian.",\n'
+            '"analysis_en": "Structured analysis in English (200-350 words) '
+            "with sections: 1. TYPE (theoretical/experimental/review/mixed), "
+            "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
+            '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10.",\n'
+            '"analysis_es": "Same analysis translated to Spanish.",\n'
+            '"analysis_ru": "Same analysis translated to Russian."}\n\n'
+            f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
+            "Rules:\n"
+            "- Preserve LaTeX/math ($...$), chemical formulas, abbreviations\n"
+            "- Keep numbered sections and bullet points in all languages\n"
+            "- Return ONLY the JSON. No markdown code blocks. No extra text."
+        )
 
-        # Llamada 1: generar resumen + analisis en EN
+        data = self._call_openrouter_json(prompt, max_tokens=3000)
+        if data and any(
+            data.get(k) for k in (
+                "summary_en", "summary_es", "summary_ru",
+                "analysis_en", "analysis_es", "analysis_ru",
+            )
+        ):
+            logger.info("Mega-prompt SA exitoso (6 claves)")
+            return data
+
+        # Fallback: 2 llamadas separadas (generar EN + traducir ES/RU)
+        logger.info("Mega-prompt SA fallo, degradando a 2 llamadas separadas")
+        result: dict = {}
         sa = self._generate_summary_and_analysis(title, abstract, authors)
         if sa.get("summary"):
             result["summary_en"] = sa["summary"]
         if sa.get("analysis"):
             result["analysis_en"] = sa["analysis"]
 
-        if not result:
-            return {}
-
-        # Llamada 2: traducir a ES + RU
-        sa_tr = self._batch_translate_sa(
-            result.get("summary_en", ""),
-            result.get("analysis_en", ""),
-        )
-        result["summary_es"] = sa_tr.get("ai_summary_es", "")
-        result["summary_ru"] = sa_tr.get("ai_summary_ru", "")
-        result["analysis_es"] = sa_tr.get("ai_analysis_es", "")
-        result["analysis_ru"] = sa_tr.get("ai_analysis_ru", "")
+        summary_en = result.get("summary_en", "")
+        analysis_en = result.get("analysis_en", "")
+        if summary_en or analysis_en:
+            sa_tr = self._batch_translate_sa(summary_en, analysis_en)
+            if sa_tr.get("ai_summary_es"):
+                result["summary_es"] = sa_tr["ai_summary_es"]
+            if sa_tr.get("ai_summary_ru"):
+                result["summary_ru"] = sa_tr["ai_summary_ru"]
+            if sa_tr.get("ai_analysis_es"):
+                result["analysis_es"] = sa_tr["ai_analysis_es"]
+            if sa_tr.get("ai_analysis_ru"):
+                result["analysis_ru"] = sa_tr["ai_analysis_ru"]
 
         return result
 
@@ -457,6 +490,11 @@ class OpenRouterService:
         Llama a OpenRouter y parsea JSON de la respuesta.
         Maneja markdown code fences, texto extra, etc.
         Retorna None si falla el parseo JSON (pero propaga OpenRouterError).
+        
+        Logs de diagnóstico:
+        - completion_tokens: tokens devueltos
+        - finish_reason: 'stop' (ok), 'length' (truncado!)
+        - content_length: chars devueltos
         """
         try:
             raw = self._call_openrouter(prompt, max_tokens=max_tokens)
@@ -472,6 +510,10 @@ class OpenRouterService:
             text = re.sub(r"\n?```\s*$", "", text)
 
         try:
+            logger.debug(
+                "JSON parsed OK: lenght=%d, max_tokens=%d",
+                len(text), max_tokens,
+            )
             return json.loads(text)
         except json.JSONDecodeError:
             # Intentar extraer JSON de texto circundante: desde primera { hasta ultima }
@@ -479,11 +521,17 @@ class OpenRouterService:
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
                 try:
-                    return json.loads(text[start:end+1])
+                    extracted = json.loads(text[start:end+1])
+                    logger.info(
+                        "JSON extracted from position %d-%d (len=%d)",
+                        start, end, len(text),
+                    )
+                    return extracted
                 except json.JSONDecodeError:
                     pass
             logger.warning(
-                "No se pudo parsear JSON de OpenRouter: %s", text[:300],
+                "JSON parse failed: length=%d, max_tokens=%d, first_300=%s",
+                len(text), max_tokens, text[:300],
             )
             return None
 
@@ -569,6 +617,11 @@ class OpenRouterService:
                         .get("message", {})
                         .get("content", "")
                     )
+                    finish_reason = data["choices"][0].get("finish_reason", "?")
+                    completion_tokens = data.get("usage", {}).get(
+                        "completion_tokens", 0
+                    )
+                    
                     if not content:
                         logger.warning(
                             "OpenRouter content vacio (%s)", model,
@@ -582,9 +635,20 @@ class OpenRouterService:
                             "(modelo principal %s no disponible)",
                             model, self.model,
                         )
-                    logger.debug(
-                        "OpenRouter: %d caracteres (%s)", len(content), model,
+                    logger.info(
+                        "OpenRouter OK: model=%s, len=%d chars, "
+                        "completion_tokens=%d, finish_reason=%s, max_tokens=%d",
+                        model, len(content), completion_tokens,
+                        finish_reason, max_tokens,
                     )
+                    # DIAGNOSTICO: si finish_reason='length', el output fue truncado
+                    if finish_reason == "length":
+                        logger.warning(
+                            "⚠️  TRUNCADO (finish_reason=length): "
+                            "model=%s, max_tokens=%d insuficientes para "
+                            "completion_tokens=%d",
+                            model, max_tokens, completion_tokens,
+                        )
                     return content.strip()
 
                 except httpx.HTTPStatusError as e:
