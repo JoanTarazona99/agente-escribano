@@ -13,8 +13,7 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  overflow-x: hidden;
-  overflow-y: visible;
+  /* overflow: hidden; -- Eliminado para permitir dropdowns visibles */
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
   user-select: none;
@@ -39,6 +38,8 @@
 .article-card__accent {
   width: 3px;
   flex-shrink: 0;
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
 }
 
 .article-card--arxiv    .article-card__accent { background: var(--accent-arxiv); }
