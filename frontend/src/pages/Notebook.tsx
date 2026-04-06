@@ -359,6 +359,17 @@ export default function Notebook() {
     );
   };
 
+  const handleRenameArticle = useCallback(async (articleId: number, newTitle: string) => {
+    try {
+      await renameArticle(articleId, newTitle);
+      queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
+      queryClient.invalidateQueries({ queryKey: ["article", String(articleId)] });
+      toast.success(t("common.saved"));
+    } catch (err: any) {
+      toast.error(t("common.error", { message: err.message }));
+    }
+  }, [notebookId, queryClient, toast, t]);
+
   const handleDeleteArticle = useCallback(async (articleId: number) => {
     removeMutation.mutate(articleId);
     if (selectedArticleId === articleId) setSelectedArticleId(null);
@@ -605,6 +616,7 @@ export default function Notebook() {
                       isSelected={article.id === selectedArticleId}
                       onSelect={() => setSelectedArticleId(article.id)}
                       onDelete={handleDeleteArticle}
+                      onRename={handleRenameArticle}
                       showAuthors={false}
                     />
                   ))

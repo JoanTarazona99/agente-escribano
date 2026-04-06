@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { getArticle, renameArticle, updateArticle } from "@/services/api";
+import { getArticle } from "@/services/api";
 import MathText from "@/components/MathText/MathText";
 import type { Article } from "@/types";
 import "./ArticleDetail.css";
@@ -22,11 +21,6 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
   const { t, i18n } = useTranslation();
   const lang = i18n.language.slice(0, 2);
   const idStr = String(articleId);
-  const queryClient = useQueryClient();
-
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedTitle, setEditedTitle] = useState("");
-  const [editedType, setEditedType] = useState<string>("unknown");
 
   const { data: article, isLoading } = useQuery({
     queryKey: ["article", idStr],
@@ -34,32 +28,8 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
     enabled: articleId > 0,
   });
 
-  useEffect(() => {
-    if (article) {
-      setEditedTitle(article.title);
-      setEditedType(article.article_type);
-    }
-  }, [article]);
-
-  const updateMutation = useMutation({
-    mutationFn: (fields: Partial<Article>) => updateArticle(articleId, fields),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(["article", idStr], updated);
-      queryClient.invalidateQueries({ queryKey: ["notebook-articles"] });
-      queryClient.invalidateQueries({ queryKey: ["articles"] });
-      setIsEditing(false);
-    },
-  });
-
   if (isLoading) return <p className="detail__loading">{t("common.loading")}</p>;
   if (!article) return <p>{t("common.not_found")}</p>;
-
-  const handleSave = () => {
-    updateMutation.mutate({
-      title: editedTitle,
-      article_type: editedType as any,
-    });
-  };
 
   const title =
     lang === "ru" && (article.title_ru || article.title)
@@ -91,49 +61,12 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
         <span className={`badge badge--${article.source_db}`}>
           {article.source_db.toUpperCase()}
         </span>
-        {isEditing ? (
-          <select
-            className="detail__type-edit"
-            value={editedType}
-            onChange={(e) => setEditedType(e.target.value)}
-          >
-            <option value="theoretical">{t("article_type.theoretical")}</option>
-            <option value="experimental">{t("article_type.experimental")}</option>
-            <option value="review">{t("article_type.review")}</option>
-            <option value="mixed">{t("article_type.mixed")}</option>
-            <option value="unknown">{t("article_type.unknown")}</option>
-          </select>
-        ) : (
-          article.article_type !== "unknown" && (
-            <span className="detail__type">{t(`article_type.${article.article_type}`)}</span>
-          )
-        )}
-        <button
-          className="detail__edit-btn"
-          onClick={() => (isEditing ? handleSave() : setIsEditing(true))}
-          disabled={updateMutation.isPending}
-        >
-          {isEditing ? "💾" : "✏️"}
-        </button>
-        {isEditing && (
-          <button className="detail__edit-btn" onClick={() => setIsEditing(false)}>
-            ✕
-          </button>
+        {article.article_type !== "unknown" && (
+          <span className="detail__type">{t(`article_type.${article.article_type}`)}</span>
         )}
       </div>
 
-      {isEditing ? (
-        <textarea
-          className="detail__title-input"
-          value={editedTitle}
-          onChange={(e) => setEditedTitle(e.target.value)}
-          rows={3}
-        />
-      ) : (
-        <h1 className="detail__title">
-          <MathText text={title} />
-        </h1>
-      )}
+      <h1 className="detail__title"><MathText text={title} /></h1>
 
       {article.authors && <p className="detail__authors">{article.authors}</p>}
 
