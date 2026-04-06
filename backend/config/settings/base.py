@@ -2,6 +2,7 @@
 Configuración base de Django — compartida entre entornos.
 Compatible con Python 3.13 / Django 5.x
 """
+from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
 
 import environ
@@ -180,6 +181,18 @@ CORS_PREFLIGHT_MAX_AGE = 3600
 
 
 # ─── django-q2 (background tasks) ─────────────────────────
+# Schedule: Tarea diaria para refrescar modelos de OpenRouter
+# Horario: 02:00 UTC (equivale a 05:00 MSK)
+# next_run: datetime aware en UTC; si ya pasó 02:00 UTC hoy, se ejecuta mañana
+_now_utc = datetime.now(timezone.utc)
+_today_0200_utc = _now_utc.replace(hour=2, minute=0, second=0, microsecond=0)
+if _now_utc >= _today_0200_utc:
+    # Ya pasó 02:00 UTC hoy, ejecutar mañana
+    _next_run_daily = _today_0200_utc + timedelta(days=1)
+else:
+    # Aún no es 02:00 UTC hoy, ejecutar hoy
+    _next_run_daily = _today_0200_utc
+
 Q_CLUSTER = {
     "name": "agente-escribano",
     "workers": 2,
@@ -191,7 +204,16 @@ Q_CLUSTER = {
     "save_limit": 100,     # guardar últimas 100 tareas
     "ack_failures": True,  # registrar fallos
     "max_attempts": 1,     # no reintentar automáticamente (el usuario decide)
-    "catch_up": False,     # no ejecutar tareas perdidas al reiniciar
+    "catch_up": False,     # NO ejecutar tareas perdidas al reiniciar (importante para refresh diario)
+    "schedule": [
+        {
+            "name": "Refresh OpenRouter Models (Daily)",
+            "func": "apps.agent.tasks.refresh_openrouter_free_models",
+            "schedule_type": "daily",
+            "repeats": -1,  # -1 = ejecutar indefinidamente
+            "next_run": _next_run_daily,  # datetime real en UTC (02:00 UTC = 05:00 MSK)
+        },
+    ],
 }
 
 # ─── Ollama / LLM ────────────────────────────────────────

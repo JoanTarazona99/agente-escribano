@@ -18,13 +18,15 @@ Resilencia en free tier (basado en datos reales, Abril 2026):
   - Deadline global: 120s
 
 Configuración (.env):
-  OPENROUTER_MODEL=qwen/qwen3.6-plus:free  (defecto — MÁS estable)
+  OPENROUTER_MODEL=qwen/qwen3.6-plus:free  (defecto)
   OPENROUTER_MODEL_PREMIUM=  (opcional, ej: openai/gpt-4-turbo)
+  Nota: Modelos fallback se cargan dinámicamente desde config/llm_models.json
 """
 import logging
 import json
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -82,10 +84,10 @@ _AI_UPDATE_FIELDS = [
     "ai_processed", "ai_processing", "ai_error", "ai_error_code",
 ]
 
-# Modelos gratuitos de fallback, ordenados por estabilidad REAL observada (Abril 2026).
-# Whitelist estricta: solo slugs :free verificados en OpenRouter.
-# Orden actualizado por datos: Qwen es el más estable (34 requests exitosos),
-# Gemma/Llama con 429 frecuente. DeepSeek muy capaz. Nvidia como último recurso.
+# Modelos gratuitos de fallback, ordenados por desempeño observado.
+# Whitelist: modelos :free verificados en OpenRouter.
+# Nota: OpenRouter cambia disponibilidad frecuentemente. Ver documentación para lista actualizada.
+# Se actualiza diariamente por task django-q2 en config/llm_models.json
 _FALLBACK_MODELS = [
     "qwen/qwen3.6-plus:free",                         # 1º más estable (34 requests OK)
     "qwen/qwen2.5-72b-instruct:free",                 # 2º alternativa Qwen
@@ -118,13 +120,62 @@ class OpenRouterService:
     2. Generar summary + analysis EN + traducir ES/RU (~50s, ~3000 tokens)
     Total: ~70s << 300s timeout django-q2
 
-    Resilencia (datos reales Abril 2026):
-    - Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, 34 requests OK)
-    - Fallbacks: qwen2.5 → deepseek-r1 → llama → gemma → nvidia
-    - Pool rate-limit: gemma/llama (429 upstream) vs Qwen (stable)
-    - Retry con backoff corto: 1.5s, 3s, 6s en 429
-    - Timeout explicito por fase HTTP
+    Resilencia:
+    - Modelo principal: qwen/qwen3.6-plus:free (por defecto)
+    - Fallbacks dinámicos: cargados desde config/llm_models.json (actualizado diariamente)
+    - Rate-limit (429): reintentos con backoff corto (1.5s, 3s, 6s)
+    - Timeout explicito: connect=10s, read=50s, write=10s, pool=5s
+    - Deadline global: 120s (respeta timeout total de django-q2)
     """
+
+    @staticmethod
+    def _load_fallback_models() -> list[str]:
+        """
+        Carga lista de modelos gratuitos desde config/llm_models.json.
+        Si el archivo no existe o está corrompido, usa la lista hardcoded.
+        
+        Returns:
+            list[str]: Lista de model IDs ordenados por prioridad
+        """
+        try:
+            config_file = Path(settings.BASE_DIR).parent / "config" / "llm_models.json"
+            if not config_file.exists():
+                logger.warning(
+                    "⚠️ Archivo config/llm_models.json no encontrado. "
+                    "Usando lista hardcoded de fallbacks."
+                )
+                return list(_FALLBACK_MODELS)
+            
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            models = data.get("openrouter_free_models", [])
+            if not models:
+                logger.warning(
+                    "⚠️ Lista de modelos vacía en config/llm_models.json. "
+                    "Usando fallback hardcoded."
+                )
+                return list(_FALLBACK_MODELS)
+            
+            logger.info(
+                f"✅ Modelos gratuitos cargados desde JSON ({len(models)} disponibles). "
+                f"Última actualización: {data.get('last_updated', 'desconocida')}"
+            )
+            return models
+        
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"❌ Error al parsear config/llm_models.json: {e}. "
+                f"Usando fallback hardcoded."
+            )
+            return list(_FALLBACK_MODELS)
+        except Exception as e:
+            logger.error(
+                f"❌ Error al cargar modelos desde JSON: {e}. "
+                f"Usando fallback hardcoded.",
+                exc_info=True
+            )
+            return list(_FALLBACK_MODELS)
 
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
@@ -136,8 +187,8 @@ class OpenRouterService:
             settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free"
         )
         
-        # Construir lista de fallbacks: gratuitos + premium opcional como último recurso
-        fallback_models = list(_FALLBACK_MODELS)
+        # Construir lista de fallbacks: gratuitos (cargados dinámicamente) + premium opcional
+        fallback_models = self._load_fallback_models()
         premium = getattr(settings, "OPENROUTER_MODEL_PREMIUM", "")
         if premium:
             fallback_models.append(premium)
