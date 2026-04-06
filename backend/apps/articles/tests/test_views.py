@@ -89,3 +89,32 @@ class TestArticleAnalyzeAPI:
         mock_async.assert_called_once()
         args = mock_async.call_args
         assert args[0][2] is True  # third positional arg is force=True
+
+
+@pytest.mark.django_db
+class TestArticleUpdateAPI:
+    def test_update_title_and_type_returns_200(self, api_client, article_factory):
+        """El endpoint PATCH /articles/{id}/ debe permitir actualizar el título y el tipo."""
+        article = article_factory(title="Old Title", article_type="unknown")
+        payload = {"title": "New Title", "article_type": "theoretical"}
+        response = api_client.patch(f"/api/articles/{article.pk}/", payload)
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["title"] == "New Title"
+        assert data["article_type"] == "theoretical"
+
+        # Verificar persistencia en base de datos
+        article.refresh_from_db()
+        assert article.title == "New Title"
+        assert article.article_type == "theoretical"
+
+    def test_update_forbidden_fields_ignored(self, api_client, article_factory):
+        """Campos como ai_processed o source_db no deben ser actualizables vía API."""
+        article = article_factory(source_db="arxiv", ai_processed=False)
+        payload = {"source_db": "scopus", "ai_processed": True}
+        response = api_client.patch(f"/api/articles/{article.pk}/", payload)
+        assert response.status_code == status.HTTP_200_OK
+
+        article.refresh_from_db()
+        assert article.source_db == "arxiv"  # No cambió
+        assert article.ai_processed is False  # No cambió

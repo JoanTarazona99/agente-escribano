@@ -101,6 +101,12 @@ export async function renameArticle(id: number, title: string): Promise<Article>
   return data;
 }
 
+/** Actualiza campos de un artículo. */
+export async function updateArticle(id: number, fields: Partial<Article>): Promise<Article> {
+  const { data } = await api.patch<Article>(`/articles/${id}/`, fields);
+  return data;
+}
+
 /** Health check del sistema (Ollama, BD, stats). */
 export interface HealthResponse {
   database: { ok: boolean; error?: string };
