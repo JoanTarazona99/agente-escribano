@@ -1,7 +1,7 @@
 """URLs principales del proyecto — Agente Escribano."""
 from django.contrib import admin
-from django.urls import include, path
-from django.views.generic import RedirectView
+from django.urls import include, path, re_path
+from django.views.generic import RedirectView, TemplateView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
