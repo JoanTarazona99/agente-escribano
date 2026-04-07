@@ -16,7 +16,8 @@ ALLOWED_HOSTS = env.list(
 # DATABASES ya está configurado en base.py leyendo DATABASE_URL
 
 # Seguridad HTTPS
-SECURE_SSL_REDIRECT = True
+SECURE_SSL_REDIRECT = False  # Render maneja HTTPS a nivel de proxy/CDN
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # Confiar en el header de Render
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
