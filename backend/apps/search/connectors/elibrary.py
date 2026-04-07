@@ -234,12 +234,21 @@ class ElibraryConnector(BaseSearchConnector):
             # eLibrary requiere campos específicos para que el POST no devuelva 
             # solo el formulario vacío o "No se encontraron publicaciones".
             form_data = {
-                **hidden_fields,
+                **hidden_fields,    # campos ocultos del home tal como vienen
                 "ftext": query,
                 "where_name": "on",
                 "where_abstract": "on",
                 "where_keywords": "on",
+                "where_fulltext": "on",
                 "type_article": "on",
+                "type_disser": "on",
+                "type_book": "on",
+                "type_report": "on",
+                "type_conf": "on",
+                "type_patent": "on",
+                "type_preprint": "on",
+                "type_grant": "on",
+                "type_dataset": "on",
                 "search_morph": "on",
                 "issues": "all",
                 "orderby": "rank",
