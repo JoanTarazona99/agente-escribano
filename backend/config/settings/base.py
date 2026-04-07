@@ -72,7 +72,10 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [
+            # DIRS apunta al build de React (Vite) para servir el SPA
+            BASE_DIR.parent / "frontend" / "dist",
+        ],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -252,3 +255,19 @@ ELIBRARY_PROXY_URL = env("ELIBRARY_PROXY_URL", default="")
 # Si la última búsqueda exitosa fue hace menos de este tiempo, se omite la
 # petición HTTP y se devuelven los artículos ya guardados en BD.
 ELIBRARY_COOLDOWN_HOURS = env.int("ELIBRARY_COOLDOWN_HOURS", default=24)
+
+ELIBRARY_COOLDOWN_HOURS = env.int("ELIBRARY_COOLDOWN_HOURS", default=24)
+
+# ─── Archivos Estáticos y Media ──────────────────────────
+# Configuración para servir el build de React (Vite) desde Django
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Directorios donde Django buscará archivos estáticos además de los de las apps
+STATICFILES_DIRS = [
+    BASE_DIR.parent / "frontend" / "dist",
+]
+
+# Configuración de Media (opcional si subes archivos)
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
