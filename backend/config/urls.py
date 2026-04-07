@@ -12,10 +12,13 @@ urlpatterns = [
     # 1. Admin y API (Rutas prioritarias)
     path("admin/", admin.site.urls),
 
-    # Agrupar todas las rutas de la API bajo /api/ para asegurar que se procesen primero
-    path("api/search/", include("apps.search.urls")),
-    path("api/articles/", include("apps.articles.urls")),
-    path("api/agent/", include("apps.agent.urls")),
+    # Las apps definen sus propios prefijos internamente:
+    # articles → articles/, notebooks/, jobs/
+    # search   → search/
+    # agent    → health/, diagnostics/
+    path("api/", include("apps.articles.urls")),
+    path("api/", include("apps.search.urls")),
+    path("api/", include("apps.agent.urls")),
 
     # OpenAPI / Swagger (dentro del espacio /api/)
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

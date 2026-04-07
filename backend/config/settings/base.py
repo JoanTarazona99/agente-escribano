@@ -73,8 +73,10 @@ TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [
-            # DIRS apunta al build de React (Vite) para servir el SPA
-            BASE_DIR.parent / "frontend" / "dist",
+            d for d in [
+                BASE_DIR.parent / "frontend" / "dist",  # Local dev
+                Path("/frontend/dist"),                  # Docker/Render
+            ] if d.is_dir()
         ],
         "APP_DIRS": True,
         "OPTIONS": {
@@ -265,7 +267,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Directorios donde Django buscará archivos estáticos además de los de las apps
 STATICFILES_DIRS = [
-    BASE_DIR.parent / "frontend" / "dist",
+    d for d in [
+        BASE_DIR.parent / "frontend" / "dist",  # Local dev
+        Path("/frontend/dist"),                  # Docker/Render
+    ] if d.is_dir()
 ]
 
 # Configuración de Media (opcional si subes archivos)
