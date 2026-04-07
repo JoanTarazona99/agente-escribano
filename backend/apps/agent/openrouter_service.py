@@ -138,10 +138,22 @@ class OpenRouterService:
             list[str]: Lista de model IDs ordenados por prioridad
         """
         try:
-            config_file = Path(settings.BASE_DIR).parent / "config" / "llm_models.json"
-            if not config_file.exists():
+            # 1. Definir rutas potenciales (Producción Docker/Render vs Desarrollo Local)
+            potential_paths = [
+                Path(settings.BASE_DIR) / "llm_models.json",  # Raíz del contenedor
+                Path(settings.BASE_DIR).parent / "config" / "llm_models.json",  # Local repo
+                Path(settings.BASE_DIR) / "config" / "llm_models.json",  # Estructura interna
+            ]
+            
+            config_file = None
+            for path in potential_paths:
+                if path.exists():
+                    config_file = path
+                    break
+            
+            if not config_file:
                 logger.warning(
-                    "⚠️ Archivo config/llm_models.json no encontrado. "
+                    "⚠️ Archivo llm_models.json no encontrado en rutas conocidas. "
                     "Usando lista hardcoded de fallbacks."
                 )
                 return list(_FALLBACK_MODELS)

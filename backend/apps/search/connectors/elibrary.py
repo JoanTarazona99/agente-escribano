@@ -258,13 +258,6 @@ class ElibraryConnector(BaseSearchConnector):
 
             r1 = session.post(_RESULTS_URL, data=form_data, headers=headers_post, timeout=30)
 
-            # Debug temporal para producción (Render) para verificar qué devuelve eLibrary
-            if not r1.text.count("restab"):
-                self.logger.warning(
-                    "eLIBRARY DEBUG: status=%d url=%s preview=%r",
-                    r1.status_code, str(r1.url), r1.text[:500]
-                )
-
             if _CAPTCHA_MARKER in str(r1.url):
                 if attempt >= _CAPTCHA_RETRIES:
                     self.logger.error(

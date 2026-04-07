@@ -12,8 +12,25 @@ logger = logging.getLogger(__name__)
 
 
 def get_models_file_path():
-    """Ruta al archivo JSON de modelos gratuitos."""
-    return Path(settings.BASE_DIR).parent / "config" / "llm_models.json"
+    """
+    Ruta al archivo JSON de modelos gratuitos. 
+    Compatible con producción (Docker/Render) y desarrollo (local/repo).
+    """
+    # 1. Ruta preferida (Producción Docker/Render)
+    prod_path = Path(settings.BASE_DIR) / "llm_models.json"
+    if prod_path.exists():
+        return prod_path
+        
+    # 2. Ruta desarrollo local (Raíz del repositorio)
+    local_repo_path = Path(settings.BASE_DIR).parent / "config" / "llm_models.json"
+    if local_repo_path.parent.exists():
+        return local_repo_path
+        
+    # 3. Estructura interna (backend/config/...)
+    config_subdir = Path(settings.BASE_DIR) / "config" / "llm_models.json"
+    if not config_subdir.parent.exists():
+        config_subdir.parent.mkdir(parents=True, exist_ok=True)
+    return config_subdir
 
 
 def refresh_openrouter_free_models():

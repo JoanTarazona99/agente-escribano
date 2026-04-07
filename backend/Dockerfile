@@ -23,6 +23,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copiar código fuente
 COPY backend/ .
 
+# Copiar configuración compartida (incluye llm_models.json inicial)
+COPY config/llm_models.json .
+
 # Exponemos puerto 8000
 # Variables de entorno por defecto para producción
 ENV DJANGO_SETTINGS_MODULE=config.settings.production
