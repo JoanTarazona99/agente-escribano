@@ -362,14 +362,35 @@ export default function Notebook() {
 
   const handleRenameArticle = useCallback(async (articleId: number, newTitle: string) => {
     try {
-      await renameArticle(articleId, newTitle);
-      queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
-      queryClient.invalidateQueries({ queryKey: ["article", String(articleId)] });
+      const updatedArticle = await renameArticle(articleId, newTitle);
+      
+      // 1. Actualizar caché del detalle (sin GET extra, el PATCH ya devuelve el objeto completo)
+      queryClient.setQueryData(["article", String(articleId)], updatedArticle);
+      
+      // 2. Actualizar la lista en caché (para mantener consistencia con paginación/filtros)
+      queryClient.setQueryData(
+        ["notebook-articles", notebookId, mergedFilters],
+        (old: any) => {
+          if (!old) return old;
+          return {
+            ...old,
+            results: old.results.map((a: Article) =>
+              a.id === articleId ? { ...a, ...updatedArticle } : a
+            ),
+          };
+        }
+      );
+
+      // 3. Actualizar el estado local (para reflejar el cambio instantáneamente en el UI)
+      setAllArticles((prev) =>
+        prev.map((a) => (a.id === articleId ? { ...a, ...updatedArticle } : a))
+      );
+      
       toast.success(t("common.saved"));
     } catch (err: any) {
       toast.error(t("common.error", { message: err.message }));
     }
-  }, [notebookId, queryClient, toast, t]);
+  }, [notebookId, mergedFilters, queryClient, toast, t]);
 
   const handleDeleteArticle = useCallback(async (articleId: number) => {
     removeMutation.mutate(articleId);

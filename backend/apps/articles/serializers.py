@@ -89,6 +89,29 @@ class ArticleUpdateSerializer(serializers.ModelSerializer):
             "abstract_ru",
         ]
 
+    def update(self, instance, validated_data):
+        """
+        Si el usuario renombra el título base ('title') y los títulos
+        en otros idiomas están vacíos o son iguales al anterior, los sincroniza.
+        """
+        new_title = validated_data.get("title")
+        if new_title:
+            # Sincronizar idiomas si no tienen valor propio manualmente
+            if not validated_data.get("title_es") and (
+                not instance.title_es or instance.title_es == instance.title
+            ):
+                validated_data["title_es"] = new_title
+            if not validated_data.get("title_en") and (
+                not instance.title_en or instance.title_en == instance.title
+            ):
+                validated_data["title_en"] = new_title
+            if not validated_data.get("title_ru") and (
+                not instance.title_ru or instance.title_ru == instance.title
+            ):
+                validated_data["title_ru"] = new_title
+
+        return super().update(instance, validated_data)
+
 
 class SearchJobSerializer(serializers.ModelSerializer):
     """Serializador para trabajos de búsqueda."""
