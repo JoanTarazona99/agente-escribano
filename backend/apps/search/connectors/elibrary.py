@@ -93,10 +93,22 @@ class ElibraryConnector(BaseSearchConnector):
 
     def _load_cookies(self) -> dict:
         """Intenta cargar cookies en este orden:
-        1. Chrome/Edge instalado (browser-cookie3) — contiene la cookie del CAPTCHA resuelto
-        2. Archivo en disco _COOKIE_FILE — sesión previa guardada por el conector
+        0. Variable de entorno ELIBRARY_COOKIES_JSON (para Render/Prod)
+        1. Chrome/Edge instalado (browser-cookie3) — local
+        2. Archivo en disco _COOKIE_FILE — sesión previa
         """
-        # 1. Leer cookies directamente de Chrome/Edge
+        # 0. Producción: leer desde variable de entorno (inyectada por Render)
+        import os
+        env_cookies = os.getenv("ELIBRARY_COOKIES_JSON")
+        if env_cookies:
+            try:
+                data = json.loads(env_cookies)
+                self.logger.debug("eLIBRARY: %d cookies desde variable de entorno", len(data))
+                return data
+            except Exception as exc:
+                self.logger.warning("eLIBRARY: error parseando ELIBRARY_COOKIES_JSON: %s", exc)
+
+        # 1. Leer cookies directamente de Chrome/Edge (Local con GUI)
         if _BROWSERCOOKIE_AVAILABLE:
             try:
                 jar = browsercookie.chrome(domain_name=".elibrary.ru")
@@ -219,20 +231,16 @@ class ElibraryConnector(BaseSearchConnector):
                 "Origin": _ELIBRARY_HOST,
                 "Content-Type": "application/x-www-form-urlencoded",
             }
+            # eLibrary requiere campos específicos para que el POST no devuelva 
+            # solo el formulario vacío o "No se encontraron publicaciones".
             form_data = {
                 **hidden_fields,
                 "ftext": query,
                 "where_name": "on",
                 "where_abstract": "on",
                 "where_keywords": "on",
-                "where_affiliation": "",
-                "where_references": "",
                 "type_article": "on",
                 "search_morph": "on",
-                "queryboxid": "",
-                "itemboxid": "",
-                "begin_year": "",
-                "end_year": "",
                 "issues": "all",
                 "orderby": "rank",
                 "order": "rev",
@@ -240,6 +248,13 @@ class ElibraryConnector(BaseSearchConnector):
             }
 
             r1 = session.post(_RESULTS_URL, data=form_data, headers=headers_post, timeout=30)
+
+            # Debug temporal para producción (Render) para verificar qué devuelve eLibrary
+            if not r1.text.count("restab"):
+                self.logger.warning(
+                    "eLIBRARY DEBUG: status=%d url=%s preview=%r",
+                    r1.status_code, str(r1.url), r1.text[:500]
+                )
 
             if _CAPTCHA_MARKER in str(r1.url):
                 if attempt >= _CAPTCHA_RETRIES:
