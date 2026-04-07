@@ -58,10 +58,10 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
       )}
 
       <div className="detail__header">
-        <span className={`badge badge--${article.source_db}`}>
-          {article.source_db.toUpperCase()}
+        <span className={`badge badge--${article.source_db || ""}`}>
+          {article.source_db?.toUpperCase() || ""}
         </span>
-        {article.article_type !== "unknown" && (
+        {article.article_type && article.article_type !== "unknown" && (
           <span className="detail__type">{t(`article_type.${article.article_type}`)}</span>
         )}
       </div>

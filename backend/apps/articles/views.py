@@ -90,6 +90,25 @@ class ArticleViewSet(
             return ArticleUpdateSerializer
         return ArticleDetailSerializer
 
+    def perform_update(self, serializer):
+        """Guardar y asegurar que el objeto refrescado se use en la respuesta."""
+        instance = serializer.save()
+        # No es estrictamente necesario, pero garantiza que post-save
+        # side effects/db triggers se reflejen antes del return.
+        instance.refresh_from_db()
+
+    def update(self, request, *args, **kwargs):
+        """Sobrescribe para devolver el detalle completo tras actualización."""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        # Devolver el detalle completo usando el serializador de detalle
+        # Esto previene errores de campos faltantes en el frontend (ej. source_db)
+        return Response(ArticleDetailSerializer(instance).data)
+
     @extend_schema(
         summary="Analizar artículo con IA (background)",
         description=(
