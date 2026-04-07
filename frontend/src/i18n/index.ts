@@ -20,6 +20,9 @@ i18n
     defaultNS: "translation",
     backend: {
       loadPath: "/locales/{{lng}}/{{ns}}.json",
+      requestOptions: {
+        cache: "default",
+      },
     },
     detection: {
       order: ["localStorage", "navigator", "htmlTag"],
