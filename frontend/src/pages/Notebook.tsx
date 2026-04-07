@@ -13,6 +13,7 @@ import {
   getAnalyzeStatus,
   startSearch,
   getJob,
+  renameArticle,
 } from "@/services/api";
 import type { Article, ArticleFilters, SearchJob, SourceDatabase } from "@/types";
 import { useToast } from "@/components/Toast/ToastContext";
