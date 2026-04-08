@@ -14,11 +14,11 @@ import {
   startSearch,
   getJob,
   renameArticle,
+  uploadFileToNotebook,
 } from "@/services/api";
 import type { Article, ArticleFilters, SearchJob, SourceDatabase } from "@/types";
 import { useToast } from "@/components/Toast/ToastContext";
-import ProgressIndicator from "@/components/ProgressIndicator/ProgressIndicator",
-  uploadFileToNotebook
+import ProgressIndicator from "@/components/ProgressIndicator/ProgressIndicator";
 import ArticleCard from "@/components/ArticleCard/ArticleCard";
 import ArticleDetail from "@/pages/ArticleDetail";
 import MathText from "@/components/MathText/MathText";
@@ -66,10 +66,10 @@ export default function Notebook() {
   const [useJobFallback, setUseJobFallback] = useState(false);
   const [inlineQuery, setInlineQuery] = useState(DEFAULT_INLINE_QUERY);
   const SOURCES_ALL: { id: SourceDatabase; label: string; disabled?: boolean }[] = [
-    { id: "arxiv",    label: "arXiv" },
+    { id: "arxiv", label: "arXiv" },
     { id: "elibrary", label: "eLIBRARY" },
-    { id: "scopus",   label: "Scopus" },
-    { id: "wos",      label: "WOS",     disabled: true },
+    { id: "scopus", label: "Scopus" },
+    { id: "wos", label: "WOS", disabled: true },
   ];
   const [activeSources, setActiveSources] = useState<SourceDatabase[]>(["arxiv", "elibrary", "scopus"]);
   const MAX_PER_SOURCE = 10;
@@ -200,8 +200,6 @@ export default function Notebook() {
   });
 
   // Timer recursivo: watchdog que se reinicia cada 5 min mientras ai_processing=true
-  // Borde 1: Si cambia de artículo, limpia el timer anterior
-  // Borde 2: Distingue "fallo de fetch" (transitorio) de "realmente no completado"
   useEffect(() => {
     startAnalyzeTimerRef.current = (articleId: number) => {
       if (analyzeTimerRef.current) {
@@ -264,12 +262,10 @@ export default function Notebook() {
     if (!analyzeStatus || !analyzingArticleId) return;
 
     if (analyzeStatus.status === "completed") {
-      // Dismiss loading toast and show success
       if (analyzeToastRef.current) {
         toast.update(analyzeToastRef.current, t("article.ai_processed_label"), "success", 4000);
         analyzeToastRef.current = null;
       }
-      // Update article data in cache
       if (analyzeStatus.article) {
         queryClient.setQueryData(["article", String(analyzingArticleId)], analyzeStatus.article);
       }
@@ -287,7 +283,6 @@ export default function Notebook() {
         toast.update(analyzeToastRef.current, errorMsg, "error", 8000);
         analyzeToastRef.current = null;
       }
-      // Refresh article to show error state
       queryClient.invalidateQueries({ queryKey: ["article", String(analyzingArticleId)] });
       setAnalyzingArticleId(null);
     }
@@ -363,11 +358,9 @@ export default function Notebook() {
   const handleRenameArticle = useCallback(async (articleId: number, newTitle: string) => {
     try {
       const updatedArticle = await renameArticle(articleId, newTitle);
-      
-      // 1. Actualizar caché del detalle (sin GET extra, el PATCH ya devuelve el objeto completo)
+
       queryClient.setQueryData(["article", String(articleId)], updatedArticle);
-      
-      // 2. Actualizar la lista en caché (para mantener consistencia con paginación/filtros)
+
       queryClient.setQueryData(
         ["notebook-articles", notebookId, mergedFilters],
         (old: any) => {
@@ -381,11 +374,10 @@ export default function Notebook() {
         }
       );
 
-      // 3. Actualizar el estado local (para reflejar el cambio instantáneamente en el UI)
       setAllArticles((prev) =>
         prev.map((a) => (a.id === articleId ? { ...a, ...updatedArticle } : a))
       );
-      
+
       toast.success(t("common.saved"));
     } catch (err: any) {
       toast.error(t("common.error", { message: err.message }));
@@ -409,13 +401,14 @@ export default function Notebook() {
   const totalCount = useJobFallback ? allArticles.length : articlesData?.count ?? 0;
 
   // ─── File drop handlers ───
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => { e.preventDefault(); setIsDragOver(true); };
-  const handleDragLeave = () => setIsDragOver(false);
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragOver(false);
-    const files = Array.from(e.dataTransfer.files);
-      const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => setIsDragOver(false);
+
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files);
@@ -436,10 +429,21 @@ export default function Notebook() {
     queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
     queryClient.invalidateQueries({ queryKey: ["notebook", id] });
   };
-    ? (lang === "es" && selectedArticle.title_es ? selectedArticle.title_es
-      : lang === "ru" && (selectedArticle.title_ru || selectedArticle.title) ? (selectedArticle.title_ru || selectedArticle.title)
-      : lang === "en" && selectedArticle.title_en ? selectedArticle.title_en
-      : selectedArticle.title)
+
+  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) setDroppedFiles((prev) => [...prev, ...files]);
+  };
+
+  // ─── Derived: selected article title for studio ───
+  const selectedTitle = selectedArticle
+    ? lang === "es" && selectedArticle.title_es
+      ? selectedArticle.title_es
+      : lang === "ru" && (selectedArticle.title_ru || selectedArticle.title)
+        ? selectedArticle.title_ru || selectedArticle.title
+        : lang === "en" && selectedArticle.title_en
+          ? selectedArticle.title_en
+          : selectedArticle.title
     : "";
 
   // ─── Loading / Error states ───
@@ -508,8 +512,11 @@ export default function Notebook() {
       </div>
 
       {/* ─── Three-panel workspace ─── */}
-      <div className={`nb-workspace${!sourcesOpen ? " nb-workspace--sources-closed" : ""}${!studioOpen ? " nb-workspace--studio-closed" : ""}`}>
-
+      <div
+        className={`nb-workspace${!sourcesOpen ? " nb-workspace--sources-closed" : ""}${
+          !studioOpen ? " nb-workspace--studio-closed" : ""
+        }`}
+      >
         {/* ═══ LEFT: Sources panel ═══ */}
         <aside className={`nb-panel nb-sources${sourcesOpen ? "" : " nb-panel--collapsed"}`}>
           <div className="nb-panel__header" onClick={() => setSourcesOpen(!sourcesOpen)}>
@@ -521,10 +528,7 @@ export default function Notebook() {
           {sourcesOpen && (
             <div className="nb-panel__body">
               {/* ─── + Añadir fuentes ─── */}
-              <button
-                className="nb-sources__add-btn"
-                onClick={() => setShowAddFiles(!showAddFiles)}
-              >
+              <button className="nb-sources__add-btn" onClick={() => setShowAddFiles(!showAddFiles)}>
                 <span>＋</span> {t("notebook.add_source")}
               </button>
 
@@ -590,7 +594,11 @@ export default function Notebook() {
               </div>
 
               {/* ─── Progress indicator ─── */}
-              {job && <div className="nb-sources__progress"><ProgressIndicator job={job} /></div>}
+              {job && (
+                <div className="nb-sources__progress">
+                  <ProgressIndicator job={job} />
+                </div>
+              )}
 
               {/* Filters */}
               <div className="nb-sources__filters">
@@ -625,7 +633,13 @@ export default function Notebook() {
                 ) : allArticles.length === 0 ? (
                   <div className="nb-sources__empty">
                     <p>{t("notebook.empty_hint")}</p>
-                    <button className="nb-sources__empty-cta" onClick={() => { const el = document.querySelector<HTMLInputElement>(".nb-inline-search__input"); el?.focus(); }}>
+                    <button
+                      className="nb-sources__empty-cta"
+                      onClick={() => {
+                        const el = document.querySelector<HTMLInputElement>(".nb-inline-search__input");
+                        el?.focus();
+                      }}
+                    >
                       {t("start_search")}
                     </button>
                   </div>
@@ -665,10 +679,7 @@ export default function Notebook() {
         <section className="nb-detail">
           <div className="nb-detail__scroll">
             {selectedArticleId ? (
-              <ArticleDetail
-                articleId={selectedArticleId}
-                onClose={() => setSelectedArticleId(null)}
-              />
+              <ArticleDetail articleId={selectedArticleId} onClose={() => setSelectedArticleId(null)} />
             ) : (
               <div className="nb-detail__empty">
                 <div className="nb-detail__empty-icon">📄</div>
@@ -691,8 +702,8 @@ export default function Notebook() {
               {selectedArticle ? (
                 <div className="nb-studio__content">
                   <div className="nb-studio__article-info">
-                    <span className={`badge badge--${selectedArticle.source_db}`}>
-                      {selectedArticle.source_db.toUpperCase()}
+                    <span className={`badge badge--${selectedArticle.source_db || ""}`}>
+                      {selectedArticle.source_db?.toUpperCase() || ""}
                     </span>
                     <h3 className="nb-studio__article-title">
                       <MathText text={selectedTitle} />
@@ -708,22 +719,20 @@ export default function Notebook() {
 
                     <button
                       className="nb-studio__action-btn"
-                      onClick={() =>
-                        analyzeMutation.mutate(!!selectedArticle.ai_processed)
-                      }
+                      onClick={() => analyzeMutation.mutate(!!selectedArticle.ai_processed)}
                       disabled={
                         analyzeMutation.isPending ||
                         selectedArticle.ai_processing ||
                         analyzingArticleId === selectedArticle.id
                       }
                     >
-                      {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id) ? (
+                      {selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id ? (
                         <span className="nb-studio__action-spinner" />
                       ) : (
                         <span className="nb-studio__action-icon">✨</span>
                       )}
                       <span className="nb-studio__action-text">
-                        {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id)
+                        {selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id
                           ? t("article.analyzing")
                           : analyzeMutation.isPending
                             ? t("article.analyzing")
