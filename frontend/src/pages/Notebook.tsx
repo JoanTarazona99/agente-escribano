@@ -60,7 +60,7 @@ export default function Notebook() {
 
   // ─── Search workspace state ───
   const [showAddFiles, setShowAddFiles] = useState(false);
-  const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
+  const [, setDroppedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [useJobFallback, setUseJobFallback] = useState(false);
