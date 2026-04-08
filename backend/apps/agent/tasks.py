@@ -154,3 +154,26 @@ def refresh_openrouter_free_models():
             "❌ [TASK] Error inesperado al actualizar modelos: %s",
             e, exc_info=True,
         )
+
+
+def probe_openrouter_model():
+    """
+    Prueba los modelos de OpenRouter y cachea el primer modelo disponible.
+    Ejecutable por django-q2 (cada hora) para mantener el cache actualizado.
+    El resultado se almacena con clave 'openrouter_available_model' (TTL 5min).
+    """
+    try:
+        from django.core.cache import cache
+        from apps.agent.openrouter_service import OpenRouterService, _PROBE_CACHE_KEY, _PROBE_CACHE_TTL
+
+        api_key = getattr(settings, "OPENROUTER_API_KEY", "")
+        if not api_key:
+            logger.warning("[PROBE] OPENROUTER_API_KEY no configurada. Saltando probe.")
+            return
+
+        service = OpenRouterService()
+        model = service.probe_available_model(force=True)
+        logger.info("[PROBE] Modelo disponible cacheado: %s (TTL %ds)", model, _PROBE_CACHE_TTL)
+        return model
+    except Exception as e:
+        logger.error("[PROBE] Error en probe de modelos OpenRouter: %s", e, exc_info=True)
