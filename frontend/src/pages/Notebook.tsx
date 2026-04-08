@@ -17,7 +17,8 @@ import {
 } from "@/services/api";
 import type { Article, ArticleFilters, SearchJob, SourceDatabase } from "@/types";
 import { useToast } from "@/components/Toast/ToastContext";
-import ProgressIndicator from "@/components/ProgressIndicator/ProgressIndicator";
+import ProgressIndicator from "@/components/ProgressIndicator/ProgressIndicator",
+  uploadFileToNotebook
 import ArticleCard from "@/components/ArticleCard/ArticleCard";
 import ArticleDetail from "@/pages/ArticleDetail";
 import MathText from "@/components/MathText/MathText";
@@ -63,7 +64,6 @@ export default function Notebook() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [useJobFallback, setUseJobFallback] = useState(false);
-  // inline search
   const [inlineQuery, setInlineQuery] = useState(DEFAULT_INLINE_QUERY);
   const SOURCES_ALL: { id: SourceDatabase; label: string; disabled?: boolean }[] = [
     { id: "arxiv",    label: "arXiv" },
@@ -415,15 +415,27 @@ export default function Notebook() {
     e.preventDefault();
     setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files);
-    if (files.length) setDroppedFiles((prev) => [...prev, ...files]);
-  };
-  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length) setDroppedFiles((prev) => [...prev, ...files]);
-  };
+      const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
 
-  // ─── Derived: selected article title for studio ───
-  const selectedTitle = selectedArticle
+    toast.loading(t("notebook.uploading_files"));
+
+    for (const file of files) {
+      try {
+        const article = await uploadFileToNotebook(notebookId, file);
+        toast.success(t("notebook.file_uploaded", { name: file.name }));
+        setAllArticles((prev) => [article, ...prev]);
+      } catch (error: any) {
+        toast.error(t("notebook.upload_error", { name: file.name, error: error.message }));
+      }
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
+    queryClient.invalidateQueries({ queryKey: ["notebook", id] });
+  };
     ? (lang === "es" && selectedArticle.title_es ? selectedArticle.title_es
       : lang === "ru" && (selectedArticle.title_ru || selectedArticle.title) ? (selectedArticle.title_ru || selectedArticle.title)
       : lang === "en" && selectedArticle.title_en ? selectedArticle.title_en
@@ -536,19 +548,6 @@ export default function Notebook() {
                   <div className="nb-sources__dropzone-icon">📎</div>
                   <p className="nb-sources__dropzone-title">{t("notebook.drop_or_click")}</p>
                   <p className="nb-sources__dropzone-hint">{t("notebook.drop_formats")}</p>
-                  {droppedFiles.length > 0 && (
-                    <ul className="nb-sources__dropped-list">
-                      {droppedFiles.map((f, i) => (
-                        <li key={i} className="nb-sources__dropped-item">
-                          <span>📄 {f.name}</span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setDroppedFiles((prev) => prev.filter((_, j) => j !== i)); }}
-                            className="nb-sources__dropped-remove"
-                          >✕</button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               )}
 
