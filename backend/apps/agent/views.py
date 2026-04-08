@@ -174,3 +174,62 @@ class DiagnosticsView(APIView):
 
         return Response(result, status=status.HTTP_200_OK)
 
+
+class ProbeModelView(APIView):
+    """
+    Endpoint para detectar el modelo OpenRouter disponible en tiempo real.
+    GET /api/probe-model/ -> {"model": "...", "cached": bool, "source": "probe|cache"}
+    Util para que el frontend sepa qué modelo está activo al cargar la pagina.
+    """
+
+    @extend_schema(
+        summary="Probe modelo OpenRouter disponible",
+        description="Detecta y cachea el primer modelo disponible (sin 429). TTL 5min.",
+        responses={200: dict, 503: dict},
+    )
+    def get(self, request: Request) -> Response:
+        from django.core.cache import cache
+        from apps.agent.openrouter_service import OpenRouterService, _PROBE_CACHE_KEY
+
+        provider = getattr(settings, "LLM_PROVIDER", "ollama")
+        if provider != "openrouter":
+            return Response(
+                {"error": "LLM_PROVIDER no es openrouter", "provider": provider},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        api_key = getattr(settings, "OPENROUTER_API_KEY", "")
+        if not api_key:
+            return Response(
+                {"error": "OPENROUTER_API_KEY no configurada"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        force = request.query_params.get("force", "false").lower() == "true"
+
+        # Verificar cache primero (sin hacer probe)
+        if not force:
+            cached_model = cache.get(_PROBE_CACHE_KEY)
+            if cached_model:
+                return Response({
+                    "model": cached_model,
+                    "cached": True,
+                    "source": "cache",
+                })
+
+        # Hacer probe en tiempo real
+        try:
+            service = OpenRouterService()
+            model = service.probe_available_model(force=True)
+            return Response({
+                "model": model,
+                "cached": False,
+                "source": "probe",
+            })
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+
