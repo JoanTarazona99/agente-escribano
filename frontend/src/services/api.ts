@@ -68,7 +68,7 @@ export async function getArticle(id: number): Promise<Article> {
 }
 
 /** Lanza el análisis IA de un artículo (background). Con force=true regenera campos existentes.
- *  Retorna 202 con { status, task_id, article_id }. */
+ * Retorna 202 con { status, task_id, article_id }. */
 export async function analyzeArticle(
   id: number,
   force = false,
@@ -76,10 +76,7 @@ export async function analyzeArticle(
   const { data } = await api.post<{ status: string; task_id?: string; article_id: number }>(
     `/articles/${id}/analyze/`,
     null,
-    {
-      params: force ? { force: "true" } : {},
-      timeout: 30_000, // Solo encola, no espera el resultado
-    },
+    { params: force ? { force: "true" } : {}, timeout: 30_000 },
   );
   return data;
 }
@@ -107,18 +104,19 @@ export async function updateArticle(id: number, fields: Partial<Article>): Promi
   return data;
 }
 
-/** Health check del sistema (Ollama, BD, stats). */
-110 export interface HealthResponse {
+/** Health check del sistema (LLM provider, BD, stats). */
+export interface HealthResponse {
   database: { ok: boolean; error?: string };
   llm: { ok: boolean; provider: string; configured: boolean; model?: string; error?: string };
   stats: { total_articles: number; ai_processed: number; ai_processing?: number; ai_failed?: number };
 }
+
 export async function getHealth(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>("/health/");
   return data;
 }
 
-// ─── Notebook API ──────────────────────────────────────────────────
+// ─── Notebook API ────────────────────────────────────────────────────────────
 
 /** Crea un nuevo cuaderno. */
 export async function createNotebook(title?: string, description?: string): Promise<Notebook> {
@@ -142,9 +140,9 @@ export async function getNotebook(id: number): Promise<Notebook> {
 }
 
 /** Actualiza un cuaderno. */
-export async function updateNotebook(111
+export async function updateNotebook(
   id: number,
-  data: { title?: string; description?: string }
+  data: { title?: string; description?: string },
 ): Promise<Notebook> {
   const response = await api.patch<Notebook>(`/notebooks/${id}/`, data);
   return response.data;
