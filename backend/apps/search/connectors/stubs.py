@@ -89,6 +89,15 @@ class WOSConnector(BaseSearchConnector):
         uq = q.upper()
         if any(uq.startswith(tag) or f" {tag}" in uq for tag in KNOWN_TAGS):
             return q
+
+        # Si la consulta viene entrecomillada completamente, quitar comillas
+        if (q.startswith('"') and q.endswith('"')) or (q.startswith("'") and q.endswith("'")):
+            q = q[1:-1].strip()
+
+        # Si el usuario ya ha pasado paréntesis externos, no duplicarlos
+        if q.startswith('(') and q.endswith(')'):
+            return f"TS={q}"
+
         return f"TS=({q})"
 
     def search(self, query: str, max_results: int = 50) -> list[ArticleData]:
@@ -109,7 +118,10 @@ class WOSConnector(BaseSearchConnector):
                 "Consulta https://developer.clarivate.com/ para obtener credenciales."
             )
 
-        limit = min(max_results, 50)  # Starter API: max 50 per page
+        # Starter API (free/starter tier) suele limitar a 10 resultados por página.
+        # Usamos 10 como máximo para evitar 400 Bad Request cuando el plan no
+        # permite valores mayores.
+        limit = min(max_results, 10)
 
         headers = {
             "X-ApiKey": api_key,
@@ -153,6 +165,20 @@ class WOSConnector(BaseSearchConnector):
                             "WOS: acceso denegado. Verifica permisos de la API key "
                             "y que el plan Starter esté activo."
                         )
+
+                    if resp.status_code == 400:
+                        # Registrar cuerpo de la respuesta para diagnóstico antes
+                        # de lanzar la excepción. Resp.text puede ser grande,
+                        # truncamos para evitar logs inmensos.
+                        try:
+                            self.logger.debug(
+                                "WOS 400 response (params=%s): %s",
+                                params,
+                                (resp.text or "")[:1000],
+                            )
+                        except Exception:
+                            pass
+                        resp.raise_for_status()
 
                     resp.raise_for_status()
                     data = resp.json()
@@ -397,58 +423,58 @@ class WOSConnector(BaseSearchConnector):
             ) as client:
                 resp = client.get(url, headers=headers)
 
-            if resp.status_code != 200:
-                self.logger.debug(
-                    "DOI scrape %s: HTTP %d", doi, resp.status_code,
-                )
-                return ""
+                if resp.status_code != 200:
+                    self.logger.debug(
+                        "DOI scrape %s: HTTP %d", doi, resp.status_code,
+                    )
+                    return ""
 
-            content_type = resp.headers.get("content-type", "")
-            if "text/html" not in content_type:
-                return ""
+                content_type = resp.headers.get("content-type", "")
+                if "text/html" not in content_type:
+                    return ""
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+                soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Probar cada selector CSS conocido
-            for selector in _ABSTRACT_SELECTORS:
-                elem = soup.select_one(selector)
-                if elem:
-                    text = " ".join(elem.get_text().strip().split())
-                    # Limpiar prefijo "Abstract" si el texto empieza con ello
-                    if text.lower().startswith("abstract"):
-                        text = text[len("abstract"):].lstrip(": ")
-                    if len(text) > 50:  # Abstract real, no un label
-                        abstract = text[:2000]
+                # Probar cada selector CSS conocido
+                for selector in _ABSTRACT_SELECTORS:
+                    elem = soup.select_one(selector)
+                    if elem:
+                        text = " ".join(elem.get_text().strip().split())
+                        # Limpiar prefijo "Abstract" si el texto empieza con ello
+                        if text.lower().startswith("abstract"):
+                            text = text[len("abstract"):].lstrip(": ")
+                        if len(text) > 50:  # Abstract real, no un label
+                            abstract = text[:2000]
+                            self.logger.debug(
+                                "DOI scrape %s: abstract encontrado (%d chars, selector=%s)",
+                                doi, len(abstract), selector,
+                            )
+                            return abstract
+
+                # Fallback: buscar <meta name="description"> (muchos publishers lo usan)
+                meta = soup.find("meta", attrs={"name": "description"})
+                if meta:
+                    content = meta.get("content", "").strip()
+                    if len(content) > 100:
                         self.logger.debug(
-                            "DOI scrape %s: abstract encontrado (%d chars, selector=%s)",
-                            doi, len(abstract), selector,
+                            "DOI scrape %s: abstract via meta description (%d chars)",
+                            doi, len(content),
                         )
-                        return abstract
+                        return content[:2000]
 
-            # Fallback: buscar <meta name="description"> (muchos publishers lo usan)
-            meta = soup.find("meta", attrs={"name": "description"})
-            if meta:
-                content = meta.get("content", "").strip()
-                if len(content) > 100:
-                    self.logger.debug(
-                        "DOI scrape %s: abstract via meta description (%d chars)",
-                        doi, len(content),
-                    )
-                    return content[:2000]
+                # Fallback: buscar <meta property="og:description">
+                og_meta = soup.find("meta", attrs={"property": "og:description"})
+                if og_meta:
+                    content = og_meta.get("content", "").strip()
+                    if len(content) > 100:
+                        self.logger.debug(
+                            "DOI scrape %s: abstract via og:description (%d chars)",
+                            doi, len(content),
+                        )
+                        return content[:2000]
 
-            # Fallback: buscar <meta property="og:description">
-            og_meta = soup.find("meta", attrs={"property": "og:description"})
-            if og_meta:
-                content = og_meta.get("content", "").strip()
-                if len(content) > 100:
-                    self.logger.debug(
-                        "DOI scrape %s: abstract via og:description (%d chars)",
-                        doi, len(content),
-                    )
-                    return content[:2000]
-
-            self.logger.debug("DOI scrape %s: no se encontró abstract", doi)
-            return ""
+                self.logger.debug("DOI scrape %s: no se encontró abstract", doi)
+                return ""
 
         except httpx.TimeoutException:
             self.logger.debug("DOI scrape %s: timeout", doi)
