@@ -232,10 +232,10 @@ OLLAMA_MODEL = env("OLLAMA_MODEL", default="llama3.2")
 # Configuración de OpenRouter (producción Render)
 # Obtén tu API key en: https://openrouter.ai/workspaces/default/keys
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
-# Modelo principal: qwen/qwen2.5-72b-instruct:free (MÁS estable, datos abril 2026: 34 requests exitosos)
-# Fallbacks en cadena: qwen/qwen2.5 → deepseek → llama → gemma → nvidia
-# Nota: gemma/llama comparten pools globales con 429 frecuente (upstream OpenRouter)
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="qwen/qwen2.5-72b-instruct:free")
+# Modelo principal: google/gemini-2.0-flash-exp:free (rápido, económico, buen pool free)
+# Fallbacks en cadena: step-3.5-flash → qwen3-235b → gemma-3-4b → llama-4-scout → deepseek-r1
+# Estrategia: priorizar modelos flash/ligeros. Los grandes (gemma-27b, llama-70b) saturan pool.
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="google/gemini-2.0-flash-exp:free")
 # Modelo premium opcional (no-free) como último fallback.
 # Ej: openai/gpt-4-turbo | anthropic/claude-3-sonnet:beta
 # Vacío = solo use fallbacks gratuitos.

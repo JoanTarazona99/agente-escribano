@@ -8,10 +8,10 @@ Documentacion: https://openrouter.ai/docs
 Optimizado: 2 llamadas API batch con mega-prompt (20s + 50s = 70s << 300s timeout).
 
 Resilencia en free tier (basado en datos reales, Abril 2026):
-  - Modelo principal: stepfun/step-3.5-flash:free (modelo principal, Abril 2026)
-  - Fallbacks: qwen2.5 → deepseek-r1 → llama → gemma → nvidia
-  - Problema: gemma/llama comparten pools globales, 429 frecuente (upstream OpenRouter)
-  - Nota: los 429 son pool-wide, NO de tu cuenta — todos los usuarios afectados
+  - Modelo principal: google/gemini-2.0-flash-exp:free (rápido, económico)
+  - Fallbacks: step-3.5-flash → qwen3-235b → gemma-3-4b → llama-4-scout
+  - Estrategia: priorizar modelos "flash" y ligeros para evitar 429
+  - Nota: modelos grandes populares (gemma-27b, llama-70b) saturan el pool free
   - Retry: 2 reintentos en 429 con backoff: 1.5s, 3s, 6s
   - Premium fallback: modelo no-free opcional si configurado
   - Timeout explícito: connect=10s, read=50s, write=10s, pool=5s
@@ -85,17 +85,17 @@ _AI_UPDATE_FIELDS = [
     "ai_processed", "ai_processing", "ai_error", "ai_error_code",
 ]
 
-# Modelos gratuitos de fallback, ordenados por desempeño observado.
-# Whitelist: modelos :free verificados en OpenRouter.
-# Nota: OpenRouter cambia disponibilidad frecuentemente. Ver documentación para lista actualizada.
+# Modelos gratuitos de fallback, ordenados por velocidad y disponibilidad.
+# Estrategia: priorizar modelos "flash" (rápidos, bajo consumo) sobre modelos grandes.
+# Modelos grandes (gemma-27b, llama-70b) saturan el pool gratuito con 429 frecuente.
 # Se actualiza diariamente por task django-q2 en config/llm_models.json
 _FALLBACK_MODELS = [
-    "stepfun/step-3.5-flash:free",                         # 1º más estable (34 requests OK)
-    "openai/gpt-oss-120b:free",                 # 2º alternativa Qwen
-    "deepseek/deepseek-r1:free",                      # 3º muy capaz
-    "meta-llama/llama-3.3-70b-instruct:free",         # 4º (429 frecuente)
-    "google/gemma-3-27b-it:free",                     # 5º (429 frecuente)
-    "nvidia/nemotron-3-super-120b-a12b:free",        # 6º último recurso
+    "google/gemini-2.0-flash-exp:free",                   # 1º Flash, rápido, buen pool
+    "stepfun/step-3.5-flash:free",                         # 2º Muy estable (34 requests OK)
+    "qwen/qwen3-235b-a22b:free",                           # 3º Qwen MoE, eficiente
+    "google/gemma-3-4b-it:free",                            # 4º Modelo pequeño, rápido
+    "meta-llama/llama-4-scout:free",                        # 5º Scout ligero
+    "deepseek/deepseek-r1:free",                            # 6º Capaz, último recurso
 ]
 
 # Reintentos en 429 antes de saltar al siguiente modelo.
@@ -125,9 +125,9 @@ class OpenRouterService:
     Total: ~70s << 300s timeout django-q2
 
     Resilencia:
-    - Modelo principal: stepfun/step-3.5-flash:free (por defecto)
+    - Modelo principal: google/gemini-2.0-flash-exp:free (por defecto)
     - Fallbacks dinámicos: cargados desde config/llm_models.json (actualizado diariamente)
-    - Rate-limit (429): reintentos con backoff corto (1.5s, 3s, 6s)
+    - Estrategia: modelos flash/ligeros primero para evitar 429 de pool saturado
     - Timeout explicito: connect=10s, read=50s, write=10s, pool=5s
     - Deadline global: 120s (respeta timeout total de django-q2)
     """
@@ -196,11 +196,11 @@ class OpenRouterService:
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        # Modelo principal: stepfun/step-3.5-flash:free (MÁS estable, datos reales: 34 requests OK).
-        # Gemma/Llama dan 429 frecuentemente. DeepSeek en fallbacks como alternativa capaz.
+        # Modelo principal: google/gemini-2.0-flash-exp:free (rápido y económico).
+        # Evitar modelos grandes populares que dan 429 constante (gemma-27b, llama-70b).
         # Premium fallback (opcional): modelo no-free si está configurado.
         self.model = getattr(
-            settings, "OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"
+            settings, "OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"
         )
         
         # Construir lista de fallbacks: gratuitos (cargados dinámicamente) + premium opcional

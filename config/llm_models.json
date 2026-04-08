@@ -1,12 +1,13 @@
 {
   "openrouter_free_models": [
-    "qwen/qwen3.6-plus:free",
-    "qwen/qwen2.5-72b-instruct:free",
-    "deepseek/deepseek-r1:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free"
+    "google/gemini-2.0-flash-exp:free",
+    "stepfun/step-3.5-flash:free",
+    "qwen/qwen3-235b-a22b:free",
+    "google/gemma-3-4b-it:free",
+    "meta-llama/llama-4-scout:free",
+    "deepseek/deepseek-r1:free"
   ],
-  "last_updated": "2026-04-06T00:00:00Z",
-  "count": 5,
-  "note": "Snapshot inicial. Se actualiza diariamente a las 02:00 UTC por django-q2 task."
+  "last_updated": "2026-04-08T00:00:00Z",
+  "count": 6,
+  "note": "Prioridad: modelos flash/ligeros primero. Evitar modelos grandes populares (gemma-27b, llama-70b) que saturan pool free."
 }
