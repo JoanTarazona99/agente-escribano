@@ -75,6 +75,22 @@ class WOSConnector(BaseSearchConnector):
     def is_available(self) -> bool:
         return bool(getattr(settings, "WOS_API_KEY", ""))
 
+    def _build_wos_query(self, query: str) -> str:
+        """
+        Convierte texto libre en una consulta válida para WOS Starter API.
+
+        Si el `query` ya contiene un field tag conocido (p. ej. "TS=", "PY=")
+        se devuelve tal cual. En caso contrario, se envuelve en `TS=(...)`.
+        """
+        KNOWN_TAGS = ("TS=", "TI=", "AU=", "DO=", "PY=", "SO=", "AB=", "AK=")
+        q = " ".join(str(query).split()).strip()
+        if not q:
+            return q
+        uq = q.upper()
+        if any(uq.startswith(tag) or f" {tag}" in uq for tag in KNOWN_TAGS):
+            return q
+        return f"TS=({q})"
+
     def search(self, query: str, max_results: int = 50) -> list[ArticleData]:
         """
         Busca documentos en Web of Science Starter API.
@@ -101,7 +117,7 @@ class WOSConnector(BaseSearchConnector):
         }
 
         params = {
-            "q": query,
+            "q": self._build_wos_query(query),
             "limit": limit,
             "page": 1,
         }
