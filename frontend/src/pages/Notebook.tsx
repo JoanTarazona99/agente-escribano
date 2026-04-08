@@ -66,10 +66,10 @@ export default function Notebook() {
   const [useJobFallback, setUseJobFallback] = useState(false);
   const [inlineQuery, setInlineQuery] = useState(DEFAULT_INLINE_QUERY);
   const SOURCES_ALL: { id: SourceDatabase; label: string; disabled?: boolean }[] = [
-    { id: "arxiv", label: "arXiv" },
+    { id: "arxiv",    label: "arXiv" },
     { id: "elibrary", label: "eLIBRARY" },
-    { id: "scopus", label: "Scopus" },
-    { id: "wos", label: "WOS", disabled: true },
+    { id: "scopus",   label: "Scopus" },
+    { id: "wos",      label: "WOS",     disabled: true },
   ];
   const [activeSources, setActiveSources] = useState<SourceDatabase[]>(["arxiv", "elibrary", "scopus"]);
   const MAX_PER_SOURCE = 10;
@@ -200,6 +200,8 @@ export default function Notebook() {
   });
 
   // Timer recursivo: watchdog que se reinicia cada 5 min mientras ai_processing=true
+  // Borde 1: Si cambia de artículo, limpia el timer anterior
+  // Borde 2: Distingue "fallo de fetch" (transitorio) de "realmente no completado"
   useEffect(() => {
     startAnalyzeTimerRef.current = (articleId: number) => {
       if (analyzeTimerRef.current) {
@@ -262,10 +264,12 @@ export default function Notebook() {
     if (!analyzeStatus || !analyzingArticleId) return;
 
     if (analyzeStatus.status === "completed") {
+      // Dismiss loading toast and show success
       if (analyzeToastRef.current) {
         toast.update(analyzeToastRef.current, t("article.ai_processed_label"), "success", 4000);
         analyzeToastRef.current = null;
       }
+      // Update article data in cache
       if (analyzeStatus.article) {
         queryClient.setQueryData(["article", String(analyzingArticleId)], analyzeStatus.article);
       }
@@ -283,6 +287,7 @@ export default function Notebook() {
         toast.update(analyzeToastRef.current, errorMsg, "error", 8000);
         analyzeToastRef.current = null;
       }
+      // Refresh article to show error state
       queryClient.invalidateQueries({ queryKey: ["article", String(analyzingArticleId)] });
       setAnalyzingArticleId(null);
     }
@@ -517,6 +522,7 @@ export default function Notebook() {
           !studioOpen ? " nb-workspace--studio-closed" : ""
         }`}
       >
+
         {/* ═══ LEFT: Sources panel ═══ */}
         <aside className={`nb-panel nb-sources${sourcesOpen ? "" : " nb-panel--collapsed"}`}>
           <div className="nb-panel__header" onClick={() => setSourcesOpen(!sourcesOpen)}>
@@ -528,7 +534,10 @@ export default function Notebook() {
           {sourcesOpen && (
             <div className="nb-panel__body">
               {/* ─── + Añadir fuentes ─── */}
-              <button className="nb-sources__add-btn" onClick={() => setShowAddFiles(!showAddFiles)}>
+              <button
+                className="nb-sources__add-btn"
+                onClick={() => setShowAddFiles(!showAddFiles)}
+              >
                 <span>＋</span> {t("notebook.add_source")}
               </button>
 
@@ -633,13 +642,7 @@ export default function Notebook() {
                 ) : allArticles.length === 0 ? (
                   <div className="nb-sources__empty">
                     <p>{t("notebook.empty_hint")}</p>
-                    <button
-                      className="nb-sources__empty-cta"
-                      onClick={() => {
-                        const el = document.querySelector<HTMLInputElement>(".nb-inline-search__input");
-                        el?.focus();
-                      }}
-                    >
+                    <button className="nb-sources__empty-cta" onClick={() => { const el = document.querySelector<HTMLInputElement>(".nb-inline-search__input"); el?.focus(); }}>
                       {t("start_search")}
                     </button>
                   </div>
@@ -679,7 +682,10 @@ export default function Notebook() {
         <section className="nb-detail">
           <div className="nb-detail__scroll">
             {selectedArticleId ? (
-              <ArticleDetail articleId={selectedArticleId} onClose={() => setSelectedArticleId(null)} />
+              <ArticleDetail
+                articleId={selectedArticleId}
+                onClose={() => setSelectedArticleId(null)}
+              />
             ) : (
               <div className="nb-detail__empty">
                 <div className="nb-detail__empty-icon">📄</div>
@@ -719,20 +725,22 @@ export default function Notebook() {
 
                     <button
                       className="nb-studio__action-btn"
-                      onClick={() => analyzeMutation.mutate(!!selectedArticle.ai_processed)}
+                      onClick={() =>
+                        analyzeMutation.mutate(!!selectedArticle.ai_processed)
+                      }
                       disabled={
                         analyzeMutation.isPending ||
                         selectedArticle.ai_processing ||
                         analyzingArticleId === selectedArticle.id
                       }
                     >
-                      {selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id ? (
+                      {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id) ? (
                         <span className="nb-studio__action-spinner" />
                       ) : (
                         <span className="nb-studio__action-icon">✨</span>
                       )}
                       <span className="nb-studio__action-text">
-                        {selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id
+                        {(selectedArticle.ai_processing || analyzingArticleId === selectedArticle.id)
                           ? t("article.analyzing")
                           : analyzeMutation.isPending
                             ? t("article.analyzing")
