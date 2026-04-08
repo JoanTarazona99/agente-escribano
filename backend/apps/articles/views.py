@@ -1,7 +1,6 @@
 """Vistas DRF para artículos científicos."""
 import logging
 from datetime import timedelta
-
 from django.utils import timezone
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
@@ -10,6 +9,7 @@ from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import Article, SearchJob, Notebook
 from .serializers import (
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class ArticleFilter(django_filters.FilterSet):
     """Filtros para la lista de artículos."""
+
     job = django_filters.NumberFilter(
         field_name="search_jobs",
         lookup_expr="exact",
@@ -93,8 +94,6 @@ class ArticleViewSet(
     def perform_update(self, serializer):
         """Guardar y asegurar que el objeto refrescado se use en la respuesta."""
         instance = serializer.save()
-        # No es estrictamente necesario, pero garantiza que post-save
-        # side effects/db triggers se reflejen antes del return.
         instance.refresh_from_db()
 
     def update(self, request, *args, **kwargs):
@@ -104,10 +103,8 @@ class ArticleViewSet(
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-
-        # Devolver el detalle completo usando el serializador de detalle
-        # Esto previene errores de campos faltantes en el frontend (ej. source_db)
         return Response(ArticleDetailSerializer(instance).data)
+
 
     @extend_schema(
         summary="Analizar artículo con IA (background)",
@@ -132,11 +129,9 @@ class ArticleViewSet(
         article = self.get_object()
         force = request.query_params.get("force", "").lower() == "true"
 
-# Si ya esta en proceso, verificar si esta atascado (>5 min sin respuesta)
         if article.ai_processing:
             stale_cutoff = timezone.now() - timedelta(minutes=5)
             if article.updated_at < stale_cutoff:
-                # Worker murio sin limpiar - auto-reset y re-encolar
                 logger.warning(
                     "Articulo %s atascado (>5 min). Auto-reset y re-encolar.",
                     article.pk,
@@ -152,25 +147,22 @@ class ArticleViewSet(
                     {"status": "processing", "detail": "El analisis ya esta en curso."},
                     status=status.HTTP_202_ACCEPTED,
                 )
-        # Marcar como en cola inmediatamente para que el frontend lo detecte
+
         article.ai_processing = True
         article.ai_error = ""
         article.ai_error_code = ""
         article.save(update_fields=["ai_processing", "ai_error", "ai_error_code"])
 
-        # Encolar tarea en background
         task_id = async_task(
             "apps.agent.services.run_analysis",
             article.pk,
             force,
             task_name=f"analyze-{article.pk}",
         )
-
         logger.info(
             "📋 Análisis encolado para artículo %s (task_id=%s, force=%s)",
             article.pk, task_id, force,
         )
-
         return Response(
             {
                 "status": "queued",
@@ -194,9 +186,6 @@ class ArticleViewSet(
         article = self.get_object()
 
         if article.ai_processing:
-            # Red de seguridad: si lleva >20 min en "processing",
-            # el worker murió sin limpiar. Auto-resetear.
-            # (20 min tolera reintentos 429 legítimos hasta 10 min)
             stale_cutoff = timezone.now() - timedelta(minutes=20)
             if article.updated_at < stale_cutoff:
                 logger.warning(
@@ -231,6 +220,7 @@ class ArticleViewSet(
             })
 
         return Response({"status": "idle"})
+
 
 
 class SearchJobViewSet(
@@ -328,3 +318,63 @@ class NotebookViewSet(viewsets.ModelViewSet):
         serializer = NotebookDetailSerializer(notebook)
         return Response(serializer.data)
 
+
+    @extend_schema(
+        summary="Subir archivo al cuaderno",
+        description="Sube un archivo (PDF, TXT, etc.) y lo añade como artículo al cuaderno.",
+        request={"multipart/form-data": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}}},
+        responses={201: ArticleDetailSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="upload-file", parser_classes=[MultiPartParser, FormParser])
+    def upload_file(self, request: Request, pk=None) -> Response:
+        """Sube un archivo y lo convierte en un artículo en el cuaderno."""
+        notebook = self.get_object()
+        file_obj = request.FILES.get("file")
+
+        if not file_obj:
+            return Response(
+                {"detail": "No se proporcionó ningún archivo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Extraer el texto del archivo según su tipo
+        filename = file_obj.name
+        file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        content = ""
+
+        try:
+            if file_ext == "pdf":
+                # Extraer texto de PDF usando PyPDF2 o similar
+                try:
+                    import PyPDF2
+                    import io
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_obj.read()))
+                    content = "\n".join([page.extract_text() for page in pdf_reader.pages])
+                except ImportError:
+                    content = "[No se pudo extraer texto - PyPDF2 no instalado]"
+            elif file_ext == "txt":
+                content = file_obj.read().decode("utf-8", errors="ignore")
+            elif file_ext in ["doc", "docx"]:
+                # Podrías usar python-docx aquí
+                content = "[Archivo Word - extractor no implementado]"
+            else:
+                content = f"[Archivo {file_ext} - tipo no soportado]"
+        except Exception as e:
+            logger.error(f"Error al procesar archivo {filename}: {e}")
+            content = f"[Error al extraer texto: {str(e)}]"
+
+        # Crear el artículo con el contenido extraído
+        article = Article.objects.create(
+            title=filename,
+            authors="Usuario local",
+            abstract_original=content[:5000],  # Limitar a 5000 caracteres para el abstract
+            source_db="unknown",
+            source_id=f"file:{filename}",
+        )
+
+        # Añadir al cuaderno
+        notebook.articles.add(article)
+
+        serializer = ArticleDetailSerializer(article)
+        logger.info(f"📄 Archivo {filename} subido como artículo #{article.pk} al notebook #{notebook.pk}")
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
