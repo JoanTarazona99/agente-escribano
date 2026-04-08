@@ -37,7 +37,7 @@ export default function Settings() {
       {/* Estado del sistema */}
       <section className="settings__section">
         <h2>{t("settings.system_status")}</h2>
-        {isLoading && <p className="settings__description settings__err">{t("common.loading")}</p>}
+        {isLoading && <p className="settings__description">{t("common.loading")}</p>}
         {isError && <p className="settings__description settings__err">{t("settings.health_error")}</p>}
         {health && (
           <div className="settings__health">
@@ -48,14 +48,15 @@ export default function Settings() {
             <div className="settings__health-row">
               <StatusDot ok={health.llm.ok} />
               <span>
-                <strong>{health.llm.provider === "openrouter" ? "OpenRouter" : "Ollama"}:</strong>{" "}
+                <strong>{health.llm.provider}:</strong>{" "}
                 {health.llm.ok
-                  ? health.llm.configured ? "OK" : "Not configured"
+                  ? `${health.llm.model ?? health.llm.provider} ${t("settings.configured")}`
                   : health.llm.error ?? "Offline"}
               </span>
             </div>
             <div className="settings__health-row">
-              <span>📊 <strong>{t("settings.stats")}:</strong> {health.stats.total_articles} {t("settings.articles")} · {health.stats.ai_processed} {t("settings.ai_analyzed")}</span>
+              <span>📊 <strong>{t("settings.stats")}:</strong> {health.stats.total_articles} {t("settings.articles")} · {health.stats.ai_processed} {t("settings.ai_analyzed")}
+              </span>
             </div>
           </div>
         )}
@@ -65,12 +66,12 @@ export default function Settings() {
       <section className="settings__section">
         <h2>{t("settings.api_keys")}</h2>
         <p className="settings__description">{t("settings.api_keys_description")}</p>
-        <div className="settings__api-keys">
-          <p><strong>Scopus:</strong> {t("settings.key_pending")}</p>
-          <p><strong>Web of Science:</strong> {t("settings.key_pending")}</p>
-          <p><strong>arXiv:</strong> {t("settings.key_not_required")}</p>
-          <p><strong>eLIBRARY:</strong> {t("settings.key_not_required")}</p>
-        </div>
+        <ul>
+          <li><strong>Scopus:</strong> {t("settings.key_pending")}</li>
+          <li><strong>Web of Science:</strong> {t("settings.key_pending")}</li>
+          <li><strong>arXiv:</strong> {t("settings.key_not_required")}</li>
+          <li><strong>eLIBRARY:</strong> {t("settings.key_not_required")}</li>
+        </ul>
       </section>
     </div>
   );
