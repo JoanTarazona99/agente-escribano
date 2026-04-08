@@ -37,7 +37,7 @@ export default function Settings() {
       {/* Estado del sistema */}
       <section className="settings__section">
         <h2>{t("settings.system_status")}</h2>
-        {isLoading && <p className="settings__description">{t("common.loading")}</p>}
+        {isLoading && <p className="settings__description settings__err">{t("common.loading")}</p>}
         {isError && <p className="settings__description settings__err">{t("settings.health_error")}</p>}
         {health && (
           <div className="settings__health">
@@ -46,12 +46,12 @@ export default function Settings() {
               <span><strong>{t("settings.database")}:</strong> {health.database.ok ? "OK" : health.database.error}</span>
             </div>
             <div className="settings__health-row">
-              <StatusDot ok={health.ollama.ok} />
+              <StatusDot ok={health.llm.ok} />
               <span>
-                <strong>Ollama:</strong>{" "}
-                {health.ollama.ok
-                  ? `${health.ollama.model} (${health.ollama.available_models?.length ?? 0} ${t("settings.models_available")})`
-                  : health.ollama.error ?? "Offline"}
+                <strong>{health.llm.provider === "openrouter" ? "OpenRouter" : "Ollama"}:</strong>{" "}
+                {health.llm.ok
+                  ? health.llm.configured ? "OK" : "Not configured"
+                  : health.llm.error ?? "Offline"}
               </span>
             </div>
             <div className="settings__health-row">
@@ -65,7 +65,7 @@ export default function Settings() {
       <section className="settings__section">
         <h2>{t("settings.api_keys")}</h2>
         <p className="settings__description">{t("settings.api_keys_description")}</p>
-        <div className="settings__info">
+        <div className="settings__api-keys">
           <p><strong>Scopus:</strong> {t("settings.key_pending")}</p>
           <p><strong>Web of Science:</strong> {t("settings.key_pending")}</p>
           <p><strong>arXiv:</strong> {t("settings.key_not_required")}</p>
