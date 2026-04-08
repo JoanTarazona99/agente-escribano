@@ -173,4 +173,18 @@ export async function searchArticlesForNotebook(query: string): Promise<ArticleL
   return data;
 }
 
+/** Sube un archivo al cuaderno. */
+export async function uploadFileToNotebook(notebookId: number, file: File): Promise<Article> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const { data } = await api.post<Article>(`/notebooks/${notebookId}/upload-file/`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return data;
+}
+
+
 export default api;
