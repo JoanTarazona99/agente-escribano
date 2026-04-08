@@ -60,7 +60,6 @@ export default function Notebook() {
 
   // ─── Search workspace state ───
   const [showAddFiles, setShowAddFiles] = useState(false);
-  const [, setDroppedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [useJobFallback, setUseJobFallback] = useState(false);
@@ -85,7 +84,6 @@ export default function Notebook() {
     setIsEditingTitle(false);
     setEditedTitle("");
     setShowAddFiles(false);
-    setDroppedFiles([]);
     setIsDragOver(false);
     setActiveJobId(null);
     setUseJobFallback(false);
@@ -427,7 +425,8 @@ export default function Notebook() {
         toast.success(t("notebook.file_uploaded", { name: file.name }));
         setAllArticles((prev) => [article, ...prev]);
       } catch (error: any) {
-        toast.error(t("notebook.upload_error", { name: file.name, error: error.message }));
+        const msg = error?.response?.data?.detail || error.message;
+        toast.error(t("notebook.upload_error", { name: file.name, error: msg }));
       }
     }
 
@@ -435,9 +434,28 @@ export default function Notebook() {
     queryClient.invalidateQueries({ queryKey: ["notebook", id] });
   };
 
-  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileInput = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length) setDroppedFiles((prev) => [...prev, ...files]);
+    if (!files.length) return;
+
+    // Reset input so the same file can be selected again
+    e.target.value = "";
+
+    toast.loading(t("notebook.uploading_files"));
+
+    for (const file of files) {
+      try {
+        const article = await uploadFileToNotebook(notebookId, file);
+        toast.success(t("notebook.file_uploaded", { name: file.name }));
+        setAllArticles((prev) => [article, ...prev]);
+      } catch (error: any) {
+        const msg = error?.response?.data?.detail || error.message;
+        toast.error(t("notebook.upload_error", { name: file.name, error: msg }));
+      }
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
+    queryClient.invalidateQueries({ queryKey: ["notebook", id] });
   };
 
   // ─── Derived: selected article title for studio ───
