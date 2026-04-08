@@ -15,6 +15,7 @@ respeta rate-limits).
 from __future__ import annotations
 
 import time
+import re
 
 import httpx
 from bs4 import BeautifulSoup
@@ -90,15 +91,65 @@ class WOSConnector(BaseSearchConnector):
         if any(uq.startswith(tag) or f" {tag}" in uq for tag in KNOWN_TAGS):
             return q
 
-        # Si la consulta viene entrecomillada completamente, quitar comillas
+        # Si la consulta viene entrecomillada completamente, quitar comillas externas
         if (q.startswith('"') and q.endswith('"')) or (q.startswith("'") and q.endswith("'")):
             q = q[1:-1].strip()
 
-        # Si el usuario ya ha pasado paréntesis externos, no duplicarlos
+        # Normalizar espacios
+        q = " ".join(q.split())
+
+        # Quitar comillas desbalanceadas internas (evita 400 por comillas sin pareja)
+        if q.count('"') % 2 != 0:
+            q = q.replace('"', '')
+        if q.count("'") % 2 != 0:
+            q = q.replace("'", "")
+
+        # Si hay paréntesis desbalanceados, eliminarlos para evitar errores de sintaxis
+        if q.count('(') != q.count(')'):
+            q = q.replace('(', ' ').replace(')', ' ')
+            q = " ".join(q.split())
+
+        # Si el usuario ya pasó paréntesis externos bien balanceados, usarlos como inner
         if q.startswith('(') and q.endswith(')'):
-            return f"TS={q}"
+            inner = q[1:-1].strip()
+            return f"TS=({inner})" if inner else q
 
         return f"TS=({q})"
+
+    def _generate_wos_query_variants(self, query: str) -> list[str]:
+        """
+        Genera variantes razonables de la query para WOS Starter API.
+
+        - Primera variante: la normal (TS=(...)) o la que ya haya devuelto
+          `_build_wos_query` si el usuario pasó tags.
+        - Variante entrecomillada: TS=("...") — algunos endpoints aceptan comillas.
+        - Variante sanitizada: eliminar caracteres especiales problemáticos.
+        """
+        q = " ".join(str(query).split()).strip()
+        variants: list[str] = []
+        primary = self._build_wos_query(q)
+        variants.append(primary)
+
+        # Si primary no contiene comillas dentro del paréntesis, probar versión entrecomillada
+        m = re.match(r"TS=\((.*)\)", primary, flags=re.IGNORECASE)
+        if m:
+            inner = m.group(1).strip()
+            if inner and '"' not in inner and "'" not in inner:
+                variants.append(f'TS=("{inner}")')
+
+        # Variante sanitizada: eliminar caracteres que suelen romper queries (excepto espacios y alfanum)
+        sanitized = re.sub(r"[^\w\s:-]", " ", q).strip()
+        if sanitized and sanitized != q:
+            variants.append(self._build_wos_query(sanitized))
+
+        # Único-keep: dedupe preservando orden
+        seen = set()
+        out = []
+        for v in variants:
+            if v not in seen:
+                seen.add(v)
+                out.append(v)
+        return out
 
     def search(self, query: str, max_results: int = 50) -> list[ArticleData]:
         """
@@ -118,21 +169,25 @@ class WOSConnector(BaseSearchConnector):
                 "Consulta https://developer.clarivate.com/ para obtener credenciales."
             )
 
-        # Starter API (free/starter tier) suele limitar a 10 resultados por página.
-        # Usamos 10 como máximo para evitar 400 Bad Request cuando el plan no
-        # permite valores mayores.
-        limit = min(max_results, 10)
+        # Leer límite por página desde settings (configurable). Por defecto 10.
+        try:
+            wos_page_limit = int(getattr(settings, "WOS_MAX_PER_PAGE", 10) or 10)
+        except Exception:
+            wos_page_limit = 10
+        limit = min(max_results, wos_page_limit)
 
         headers = {
             "X-ApiKey": api_key,
             "Accept": "application/json",
         }
 
+        # Construir variantes de query para reintentos locales (evitar 400 por sintaxis)
         params = {
             "q": self._build_wos_query(query),
             "limit": limit,
             "page": 1,
         }
+        candidate_qs = self._generate_wos_query_variants(query)
 
         # Proxy para desarrollo local (VPN); vacío en producción.
         proxy = getattr(settings, "HTTP_PROXY", "") or None
@@ -144,57 +199,65 @@ class WOSConnector(BaseSearchConnector):
         for attempt in range(retries):
             try:
                 with httpx.Client(timeout=timeout, proxy=proxy) as client:
-                    resp = client.get(
-                        f"{WOS_BASE_URL}/documents",
-                        headers=headers,
-                        params=params,
-                    )
-
-                    if resp.status_code == 429:
-                        self.logger.warning(
-                            "WOS 429 rate-limited (intento %d/%d), esperando %ss",
-                            attempt + 1, retries, _RATE_LIMIT_DELAY,
-                        )
-                        time.sleep(_RATE_LIMIT_DELAY)
-                        continue
-
-                    if resp.status_code == 401:
-                        raise ValueError("WOS API Key inválida o expirada")
-                    if resp.status_code == 403:
-                        raise ValueError(
-                            "WOS: acceso denegado. Verifica permisos de la API key "
-                            "y que el plan Starter esté activo."
-                        )
-
-                    if resp.status_code == 400:
-                        # Registrar cuerpo de la respuesta para diagnóstico antes
-                        # de lanzar la excepción. Resp.text puede ser grande,
-                        # truncamos para evitar logs inmensos.
+                    # Probar variantes de la query en este intento
+                    for candidate_q in candidate_qs:
+                        params["q"] = candidate_q
                         try:
-                            self.logger.debug(
-                                "WOS 400 response (params=%s): %s",
-                                params,
-                                (resp.text or "")[:1000],
+                            resp = client.get(
+                                f"{WOS_BASE_URL}/documents",
+                                headers=headers,
+                                params=params,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # Problema de red con este candidato -> probar siguiente
+                            self.logger.debug("WOS request error para q=%r: %s", candidate_q, e)
+                            continue
+
+                        if resp.status_code == 429:
+                            self.logger.warning(
+                                "WOS 429 rate-limited (intento %d/%d), esperando %ss",
+                                attempt + 1, retries, _RATE_LIMIT_DELAY,
+                            )
+                            time.sleep(_RATE_LIMIT_DELAY)
+                            # Romper la exploración de candidatos y reintentar en el siguiente intento
+                            break
+
+                        if resp.status_code == 401:
+                            raise ValueError("WOS API Key inválida o expirada")
+                        if resp.status_code == 403:
+                            raise ValueError(
+                                "WOS: acceso denegado. Verifica permisos de la API key "
+                                "y que el plan Starter esté activo."
+                            )
+
+                        if resp.status_code == 400:
+                            # Registrar cuerpo para diagnóstico y probar siguiente variante
+                            try:
+                                self.logger.debug(
+                                    "WOS 400 response (q=%s, params_limit=%s): %s",
+                                    candidate_q,
+                                    params.get("limit"),
+                                    (resp.text or "")[:1000],
+                                )
+                            except Exception:
+                                pass
+                            # probar siguiente variante
+                            continue
+
+                        # Cualquiera otro status -> raise_for_status() para manejo central
                         resp.raise_for_status()
 
-                    resp.raise_for_status()
-                    data = resp.json()
-                    articles = self._parse_response(data)
-                    # Enriquecer con abstracts scrapeados via DOI
-                    articles = self._enrich_with_abstracts(articles, proxy)
-                    return articles
+                        data = resp.json()
+                        articles = self._parse_response(data)
+                        # Enriquecer con abstracts scrapeados via DOI
+                        articles = self._enrich_with_abstracts(articles, proxy)
+                        return articles
 
-            except httpx.HTTPStatusError as exc:
-                last_error = f"HTTP {exc.response.status_code}"
-                self.logger.error(
-                    "WOS HTTP error (intento %d/%d): %s",
-                    attempt + 1, retries, exc,
-                )
-                if attempt < retries - 1:
-                    time.sleep(_RATE_LIMIT_DELAY)
+                    # Si llegamos aquí, o bien hubo 429 que rompió el ciclo de variantes,
+                    # o ninguna variante devolvió 2xx -> esperar antes del próximo intento
+                    if attempt < retries - 1:
+                        time.sleep(_RATE_LIMIT_DELAY)
+
             except httpx.TimeoutException as exc:
                 last_error = f"Timeout: {exc}"
                 self.logger.error(

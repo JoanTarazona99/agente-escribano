@@ -245,6 +245,7 @@ OPENROUTER_MODEL_PREMIUM = env("OPENROUTER_MODEL_PREMIUM", default="")
 # ─── APIs académicas ─────────────────────────────────────
 SCOPUS_API_KEY = env("SCOPUS_API_KEY", default="")
 WOS_API_KEY = env("WOS_API_KEY", default="")
+WOS_MAX_PER_PAGE = env.int("WOS_MAX_PER_PAGE", default=10)
 
 # ─── Proxy HTTP (desarrollo local detrás de VPN) ─────────
 # Formato: http://127.0.0.1:10809  — vacío = sin proxy.
