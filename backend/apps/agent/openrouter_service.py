@@ -798,23 +798,23 @@ class OpenRouterService:
                         )
                         all_rate_limited = False
                         break
-                                # 400 = modelo ID inválido -> saltar al siguiente (no fatal)
-                if code == 400:
-                    logger.warning(
-                        "Modelo %s inválido (400), probando siguiente: %s",
-                        model, body[:200],
-                    )
-                    all_rate_limited = False
-                    break
-                # Otros 4xx son fatales
-                if 400 < code < 500:
-                    raise OpenRouterError(
-                        f"OpenRouter error {code}: {body[:200]}",
-                        code="unknown",
-                    ) from e
-                    # 5xx -> probar siguiente modelo
-                    all_rate_limited = False
-                    break
+                                    # 400 = modelo ID inválido -> saltar al siguiente (no fatal)
+                    if code == 400:
+                        logger.warning(
+                            "Modelo %s inválido (400), probando siguiente: %s",
+                            model, body[:200],
+                        )
+                        all_rate_limited = False
+                        break
+                    # Otros 4xx son fatales
+                    if 400 < code < 500:
+                        raise OpenRouterError(
+                            f"OpenRouter error {code}: {body[:200]}",
+                            code="unknown",
+                        ) from e
+                        # 5xx -> probar siguiente modelo
+                        all_rate_limited = False
+                        break
 
                 except httpx.TimeoutException:
                     logger.warning(
