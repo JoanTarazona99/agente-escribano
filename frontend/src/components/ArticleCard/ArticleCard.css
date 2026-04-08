@@ -91,7 +91,7 @@
 /* ── 3-dot menu ────────────────────────────────────────── */
 .article-card__menu-wrap {
   position: relative;
-  margin-left: 4px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
