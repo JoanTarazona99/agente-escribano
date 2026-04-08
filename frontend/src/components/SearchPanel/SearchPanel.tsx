@@ -12,12 +12,17 @@ const DISABLED_SOURCES: Set<SourceDatabase> = new Set(["wos"]);
 interface SearchPanelProps {
   onSearch: (query: string, sources: SourceDatabase[], maxPerSource: number) => void;
   isLoading?: boolean;
+  disabledSources?: SourceDatabase[];
+  initialSources?: SourceDatabase[];
 }
 
-export default function SearchPanel({ onSearch, isLoading = false }: SearchPanelProps) {
+export default function SearchPanel({ onSearch, isLoading = false, disabledSources, initialSources }: SearchPanelProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState(DEFAULT_QUERY);
-  const [sources, setSources] = useState<SourceDatabase[]>(["arxiv", "elibrary"]);
+  const [sources, setSources] = useState<SourceDatabase[]>(initialSources ?? ["arxiv", "elibrary"]);
+
+  // Allow callers to override which sources are disabled (e.g. enable WOS inside a notebook)
+  const disabledSet = new Set<SourceDatabase>(disabledSources ?? Array.from(DISABLED_SOURCES));
   const [maxPerSource, setMaxPerSource] = useState(10);
 
   const toggleSource = (src: SourceDatabase) => {
@@ -65,7 +70,7 @@ export default function SearchPanel({ onSearch, isLoading = false }: SearchPanel
         <span className="search-panel__label">{t("search.sources_label")}</span>
         <div className="search-panel__sources">
           {ALL_SOURCES.map((src) => {
-            const isDisabled = DISABLED_SOURCES.has(src);
+            const isDisabled = disabledSet.has(src);
             return (
               <label
                 key={src}
