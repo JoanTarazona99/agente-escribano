@@ -98,15 +98,15 @@ class ArticleUpdateSerializer(serializers.ModelSerializer):
         if new_title:
             # Sincronizar idiomas si no tienen valor propio manualmente
             if not validated_data.get("title_es") and (
-                not instance.title_es or instance.title_es == instance.title
+                not instance.title_es or instance.title_es != new_title
             ):
                 validated_data["title_es"] = new_title
             if not validated_data.get("title_en") and (
-                not instance.title_en or instance.title_en == instance.title
+                not instance.title_en or instance.title_en != new_title
             ):
                 validated_data["title_en"] = new_title
             if not validated_data.get("title_ru") and (
-                not instance.title_ru or instance.title_ru == instance.title
+                not instance.title_ru or instance.title_ru != new_title
             ):
                 validated_data["title_ru"] = new_title
 
