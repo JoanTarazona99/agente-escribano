@@ -5,8 +5,8 @@ Jerarquía:
   BaseSearchConnector (abstracto)
   ├── ArxivConnector       — API pública, sin credenciales
   ├── ElibraryConnector    — scraping httpx + BeautifulSoup4
-  ├── ScopusConnector      — stub (NotImplementedError hasta tener API key)
-  └── WOSConnector         — stub (NotImplementedError hasta tener API key)
+  ├── ScopusConnector      — Elsevier API (requiere SCOPUS_API_KEY)
+  └── WOSConnector         — WOS Starter API (requiere WOS_API_KEY)
 """
 from __future__ import annotations
 

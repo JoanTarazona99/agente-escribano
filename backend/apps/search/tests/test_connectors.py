@@ -174,10 +174,10 @@ class TestScopusConnectorStub:
 
 
 class TestWOSConnectorStub:
-    def test_raises_not_implemented_without_key(self, settings):
+    def test_raises_error_without_key(self, settings):
         settings.WOS_API_KEY = ""
         connector = WOSConnector()
-        with pytest.raises(NotImplementedError, match="WOS_API_KEY"):
+        with pytest.raises(ValueError, match="WOS_API_KEY"):
             connector.search("test")
 
 
@@ -305,3 +305,148 @@ class TestElibraryConnector:
 
         results = ElibraryConnector().search("тест")
         assert results == []
+
+
+# ─── WOS Starter API ─────────────────────────────────────────────────────────
+
+WOS_SAMPLE_RESPONSE = {
+    "metadata": {"total": 2, "page": 1, "limit": 10},
+    "hits": [
+        {
+            "uid": "WOS:000123456789",
+            "title": "Water Dissociation in Bipolar Membranes Under Electric Field",
+            "names": {
+                "authors": [
+                    {"displayName": "Smith, John A.", "wosStandard": "Smith, JA"},
+                    {"displayName": "Doe, Jane B.", "wosStandard": "Doe, JB"},
+                ]
+            },
+            "source": {
+                "sourceTitle": "Journal of Membrane Science",
+                "publishYear": 2024,
+            },
+            "identifiers": {"doi": "10.1016/j.memsci.2024.001"},
+            "keywords": {"authorKeywords": ["water dissociation", "bipolar membrane", "electrodialysis"]},
+            "publicationDate": {"year": 2024, "month": "MAR", "day": 15},
+        },
+        {
+            "uid": "WOS:000987654321",
+            "title": "Ion Transport Phenomena in Electromembrane Systems",
+            "names": {
+                "authors": [
+                    {"displayName": "Brown, Mark C."},
+                ]
+            },
+            "source": {
+                "sourceTitle": "Electrochimica Acta",
+                "publishYear": 2023,
+            },
+            "identifiers": {},
+            "keywords": {},
+        },
+    ],
+}
+
+
+class TestWOSConnector:
+    def test_is_available_false_without_key(self, settings):
+        settings.WOS_API_KEY = ""
+        assert WOSConnector().is_available() is False
+
+    def test_is_available_true_with_key(self, settings):
+        settings.WOS_API_KEY = "fake-key-12345"
+        assert WOSConnector().is_available() is True
+
+    def test_raises_error_without_key(self, settings):
+        settings.WOS_API_KEY = ""
+        connector = WOSConnector()
+        with pytest.raises(ValueError, match="WOS_API_KEY"):
+            connector.search("test")
+
+    @respx.mock
+    def test_search_returns_articles(self, settings):
+        settings.WOS_API_KEY = "fake-key-12345"
+        settings.HTTP_PROXY = ""
+
+        respx.get("https://api.clarivate.com/apis/wos-starter/v1/documents").mock(
+            return_value=httpx.Response(
+                200, json=WOS_SAMPLE_RESPONSE,
+                headers={"content-type": "application/json"},
+            )
+        )
+
+        results = WOSConnector().search("water dissociation membrane")
+        assert len(results) == 2
+
+        assert results[0].title == "Water Dissociation in Bipolar Membranes Under Electric Field"
+        assert results[0].source_db == "wos"
+        assert results[0].source_id == "WOS:000123456789"
+        assert results[0].year == 2024
+        assert results[0].doi == "10.1016/j.memsci.2024.001"
+        assert results[0].journal == "Journal of Membrane Science"
+        assert "Smith" in results[0].authors
+        assert "Doe" in results[0].authors
+        assert "water dissociation" in results[0].keywords
+        assert results[0].url == "https://doi.org/10.1016/j.memsci.2024.001"
+
+        assert results[1].title == "Ion Transport Phenomena in Electromembrane Systems"
+        assert results[1].year == 2023
+        assert results[1].doi is None
+        assert "WOS:000987654321" in results[1].url
+
+    @respx.mock
+    def test_search_returns_empty_on_no_hits(self, settings):
+        settings.WOS_API_KEY = "fake-key-12345"
+        settings.HTTP_PROXY = ""
+
+        respx.get("https://api.clarivate.com/apis/wos-starter/v1/documents").mock(
+            return_value=httpx.Response(
+                200, json={"metadata": {"total": 0}, "hits": []},
+                headers={"content-type": "application/json"},
+            )
+        )
+
+        results = WOSConnector().search("nonexistent query")
+        assert results == []
+
+    @respx.mock
+    def test_search_returns_empty_on_server_error(self, settings):
+        settings.WOS_API_KEY = "fake-key-12345"
+        settings.HTTP_PROXY = ""
+
+        respx.get("https://api.clarivate.com/apis/wos-starter/v1/documents").mock(
+            return_value=httpx.Response(500, text="Internal Server Error")
+        )
+
+        results = WOSConnector().search("test")
+        assert results == []
+
+    @respx.mock
+    def test_raises_on_401(self, settings):
+        settings.WOS_API_KEY = "invalid-key"
+        settings.HTTP_PROXY = ""
+
+        respx.get("https://api.clarivate.com/apis/wos-starter/v1/documents").mock(
+            return_value=httpx.Response(401, text="Unauthorized")
+        )
+
+        with pytest.raises(ValueError, match="inválida"):
+            WOSConnector().search("test")
+
+    @respx.mock
+    def test_retries_on_429(self, settings):
+        settings.WOS_API_KEY = "fake-key-12345"
+        settings.HTTP_PROXY = ""
+
+        route = respx.get("https://api.clarivate.com/apis/wos-starter/v1/documents")
+        route.side_effect = [
+            httpx.Response(429, text="Too Many Requests"),
+            httpx.Response(
+                200, json=WOS_SAMPLE_RESPONSE,
+                headers={"content-type": "application/json"},
+            ),
+        ]
+
+        results = WOSConnector().search("test")
+        assert len(results) == 2
+        assert route.call_count == 2
