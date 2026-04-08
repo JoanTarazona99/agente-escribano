@@ -97,7 +97,7 @@ export async function deleteArticle(id: number): Promise<void> {
 
 /** Renombra (actualiza título) un artículo. */
 export async function renameArticle(id: number, title: string): Promise<Article> {
-  const { data } = await api.patch<Article>(`/articles/${id}/`, { title, title_es: null, title_ru: null, title_en: null });
+  const { data } = await api.patch<Article>(`/articles/${id}/`, { title });
   return data;
 }
 
