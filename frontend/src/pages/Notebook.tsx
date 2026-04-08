@@ -417,7 +417,7 @@ export default function Notebook() {
     const files = Array.from(e.dataTransfer.files);
     if (!files.length) return;
 
-    toast.loading(t("notebook.uploading_files"));
+    const loadingId = toast.loading(t("notebook.uploading_files"));
 
     for (const file of files) {
       try {
@@ -430,6 +430,7 @@ export default function Notebook() {
       }
     }
 
+    toast.dismiss(loadingId);
     queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
     queryClient.invalidateQueries({ queryKey: ["notebook", id] });
   };
@@ -441,7 +442,7 @@ export default function Notebook() {
     // Reset input so the same file can be selected again
     e.target.value = "";
 
-    toast.loading(t("notebook.uploading_files"));
+    const loadingId = toast.loading(t("notebook.uploading_files"));
 
     for (const file of files) {
       try {
@@ -454,6 +455,7 @@ export default function Notebook() {
       }
     }
 
+    toast.dismiss(loadingId);
     queryClient.invalidateQueries({ queryKey: ["notebook-articles", notebookId] });
     queryClient.invalidateQueries({ queryKey: ["notebook", id] });
   };
