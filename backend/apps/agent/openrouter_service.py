@@ -121,7 +121,7 @@ class OpenRouterService:
     Total: ~70s << 300s timeout django-q2
 
     Resilencia:
-    - Modelo principal: qwen/qwen3.6-plus:free (por defecto)
+    - Modelo principal: stepfun/step-3.5-flash:free (por defecto)
     - Fallbacks dinámicos: cargados desde config/llm_models.json (actualizado diariamente)
     - Rate-limit (429): reintentos con backoff corto (1.5s, 3s, 6s)
     - Timeout explicito: connect=10s, read=50s, write=10s, pool=5s
@@ -192,11 +192,11 @@ class OpenRouterService:
     def __init__(self):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = "https://openrouter.ai/api/v1"
-        # Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, datos reales: 34 requests OK).
+        # Modelo principal: stepfun/step-3.5-flash:free (MÁS estable, datos reales: 34 requests OK).
         # Gemma/Llama dan 429 frecuentemente. DeepSeek en fallbacks como alternativa capaz.
         # Premium fallback (opcional): modelo no-free si está configurado.
         self.model = getattr(
-            settings, "OPENROUTER_MODEL", "qwen/qwen3.6-plus:free"
+            settings, "OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"
         )
         
         # Construir lista de fallbacks: gratuitos (cargados dinámicamente) + premium opcional
@@ -798,12 +798,20 @@ class OpenRouterService:
                         )
                         all_rate_limited = False
                         break
-                    # Otros 4xx son fatales
-                    if 400 <= code < 500:
-                        raise OpenRouterError(
-                            f"OpenRouter error {code}: {body[:200]}",
-                            code="unknown",
-                        ) from e
+                                # 400 = modelo ID inválido -> saltar al siguiente (no fatal)
+                if code == 400:
+                    logger.warning(
+                        "Modelo %s inválido (400), probando siguiente: %s",
+                        model, body[:200],
+                    )
+                    all_rate_limited = False
+                    break
+                # Otros 4xx son fatales
+                if 400 < code < 500:
+                    raise OpenRouterError(
+                        f"OpenRouter error {code}: {body[:200]}",
+                        code="unknown",
+                    ) from e
                     # 5xx -> probar siguiente modelo
                     all_rate_limited = False
                     break
