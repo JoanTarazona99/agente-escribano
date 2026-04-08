@@ -7,6 +7,9 @@ name = "agente-escribano-backend"
 version = "0.1.0"
 requires-python = ">=3.13"
 description = "Agente de búsqueda y análisis de artículos sobre ЭМС"
+dependencies = [
+    "PyPDF2>=3.0.0",
+]
 
 # ─── pytest ───────────────────────────────────────────────
 [tool.pytest.ini_options]
