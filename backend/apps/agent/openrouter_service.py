@@ -357,9 +357,11 @@ class OpenRouterService:
                 full_text[:4000] if full_text
                 else article.abstract_en
                 or article.abstract_original
-                or article.title
+                or ""
             )
             authors = article.authors[:200] if article.authors else "Unknown"
+            keywords = getattr(article, "keywords", "") or ""
+            journal = getattr(article, "journal", "") or ""
 
             need_sa = (
                 not article.ai_summary
@@ -372,6 +374,7 @@ class OpenRouterService:
             if need_sa:
                 sa = self._generate_and_translate_sa(
                     article.title, best_abstract, authors,
+                    keywords=keywords, journal=journal,
                 )
                 sa_field_map = {
                     "summary_en": ("ai_summary", "ai_summary_en"),
@@ -487,10 +490,14 @@ class OpenRouterService:
 
     def _generate_and_translate_sa(
         self, title: str, abstract: str, authors: str,
+        keywords: str = "", journal: str = "",
     ) -> dict:
         """
         Mega-prompt: genera resumen + analisis en EN y traduce a ES/RU,
         todo en 1 sola llamada API -> JSON con 6 claves.
+
+        Si no hay abstract, usa título + keywords + journal para generar
+        un resumen fiel sin alucinaciones.
 
         Fallback: si el JSON falla, degrada a 2 llamadas separadas
         (_generate_summary_and_analysis + _batch_translate_sa).
@@ -499,30 +506,60 @@ class OpenRouterService:
             dict con claves: summary_en, summary_es, summary_ru,
                              analysis_en, analysis_es, analysis_ru.
         """
-        if not abstract or not abstract.strip():
+        has_abstract = abstract and abstract.strip()
+
+        if not has_abstract and not title.strip():
             return {}
 
-        prompt = (
-            "Analyze this scientific article. Return ONLY a valid JSON "
-            "object with these 6 keys:\n\n"
-            '{"summary_en": "Concise summary in English (150-250 words) '
-            "covering: objectives, methodology, key findings, conclusions, "
-            "and relevance to water dissociation/recombination in "
-            'electromembrane systems.",\n'
-            '"summary_es": "Same summary translated to Spanish.",\n'
-            '"summary_ru": "Same summary translated to Russian.",\n'
-            '"analysis_en": "Structured analysis in English (200-350 words) '
-            "with sections: 1. TYPE (theoretical/experimental/review/mixed), "
-            "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
-            '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10.",\n'
-            '"analysis_es": "Same analysis translated to Spanish.",\n'
-            '"analysis_ru": "Same analysis translated to Russian."}\n\n'
-            f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
-            "Rules:\n"
-            "- Preserve LaTeX/math ($...$), chemical formulas, abbreviations\n"
-            "- Keep numbered sections and bullet points in all languages\n"
-            "- Return ONLY the JSON. No markdown code blocks. No extra text."
-        )
+        if has_abstract:
+            prompt = (
+                "Analyze this scientific article. Return ONLY a valid JSON "
+                "object with these 6 keys:\n\n"
+                '{"summary_en": "Concise summary in English (150-250 words) '
+                "covering: objectives, methodology, key findings, conclusions, "
+                "and relevance to water dissociation/recombination in "
+                'electromembrane systems.",\n'
+                '"summary_es": "Same summary translated to Spanish.",\n'
+                '"summary_ru": "Same summary translated to Russian.",\n'
+                '"analysis_en": "Structured analysis in English (200-350 words) '
+                "with sections: 1. TYPE (theoretical/experimental/review/mixed), "
+                "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
+                '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10.",\n'
+                '"analysis_es": "Same analysis translated to Spanish.",\n'
+                '"analysis_ru": "Same analysis translated to Russian."}\n\n'
+                f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
+                "Rules:\n"
+                "- Preserve LaTeX/math ($...$), chemical formulas, abbreviations\n"
+                "- Keep numbered sections and bullet points in all languages\n"
+                "- Return ONLY the JSON. No markdown code blocks. No extra text."
+            )
+        else:
+            # Prompt especial para artículos sin abstract (ej: WOS Starter API)
+            kw_info = f"Keywords: {keywords}\n" if keywords else ""
+            j_info = f"Journal: {journal}\n" if journal else ""
+            prompt = (
+                "This article has NO abstract available. Based ONLY on the title, "
+                "keywords, and journal below, generate a FAITHFUL summary and analysis.\n\n"
+                "IMPORTANT: Do NOT invent specific results or methodology. "
+                "Use hedging language like 'likely', 'presumably', 'appears to focus on'.\n\n"
+                "Return ONLY a valid JSON object with these 6 keys:\n\n"
+                '{"summary_en": "Brief metadata-based summary in English (80-120 words) '
+                "describing the likely research topic, field, and potential relevance "
+                'to water dissociation/recombination in electromembrane systems.",\n'
+                '"summary_es": "Same summary translated to Spanish.",\n'
+                '"summary_ru": "Same summary translated to Russian.",\n'
+                '"analysis_en": "Brief metadata-based analysis in English (100-200 words) '
+                "with sections: 1. LIKELY TYPE, 2. PROBABLE FIELD, "
+                "3. POTENTIAL RELEVANCE TO EMS, 4. NOTE: Analysis based on metadata only "
+                '(no abstract available). RATING N/10 (metadata-based).",\n'
+                '"analysis_es": "Same analysis translated to Spanish.",\n'
+                '"analysis_ru": "Same analysis translated to Russian."}\n\n'
+                f"Title: {title}\nAuthors: {authors}\n{kw_info}{j_info}\n"
+                "Rules:\n"
+                "- Be honest about the limited information available\n"
+                "- Preserve LaTeX/math, chemical formulas, abbreviations\n"
+                "- Return ONLY the JSON. No markdown code blocks. No extra text."
+            )
 
         data = self._call_openrouter_json(prompt, max_tokens=4000)
         if data and any(
@@ -561,23 +598,36 @@ class OpenRouterService:
     def _generate_summary_and_analysis(
         self, title: str, abstract: str, authors: str,
     ) -> dict:
-        """Genera resumen + analisis en ingles en 1 llamada -> JSON."""
+        """Genera resumen + analisis en ingles en 1 llamada -> JSON.
+        Si no hay abstract, usa info del título para resumen metadata-based."""
         if not abstract or not abstract.strip():
-            return {}
-
-        prompt = (
-            "Analyze this scientific article and return ONLY a valid JSON "
-            "object with two keys:\n\n"
-            '{"summary": "Concise summary in English (150-250 words) covering: '
-            "objectives, methodology, key findings, conclusions, and relevance "
-            'to water dissociation/recombination in electromembrane systems.",'
-            '\n"analysis": "Structured analysis in English (200-350 words) with '
-            "sections: 1. TYPE (theoretical/experimental/review/mixed), "
-            "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
-            '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10."}\n\n'
-            f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
-            "Return ONLY the JSON. No markdown code blocks. No extra text."
-        )
+            # Sin abstract: generar resumen breve basado en título
+            if not title.strip():
+                return {}
+            prompt = (
+                "This article has NO abstract. Based ONLY on the title, "
+                "generate a brief summary and analysis. "
+                "Do NOT invent results. Use hedging language.\n\n"
+                "Return ONLY a valid JSON:\n"
+                '{"summary": "Brief metadata-based summary (80-120 words)",\n'
+                '"analysis": "Brief analysis noting this is metadata-only"}\n\n'
+                f"Title: {title}\nAuthors: {authors}\n\n"
+                "Return ONLY JSON."
+            )
+        else:
+            prompt = (
+                "Analyze this scientific article and return ONLY a valid JSON "
+                "object with two keys:\n\n"
+                '{"summary": "Concise summary in English (150-250 words) covering: '
+                "objectives, methodology, key findings, conclusions, and relevance "
+                'to water dissociation/recombination in electromembrane systems.",'
+                '\n"analysis": "Structured analysis in English (200-350 words) with '
+                "sections: 1. TYPE (theoretical/experimental/review/mixed), "
+                "2. METHODOLOGY, 3. KEY FINDINGS (2-3 bullet points), "
+                '4. EMS RELEVANCE, 5. LIMITATIONS, 6. RATING N/10."}\n\n'
+                f"Title: {title}\nAuthors: {authors}\nAbstract: {abstract}\n\n"
+                "Return ONLY the JSON. No markdown code blocks. No extra text."
+            )
 
         data = self._call_openrouter_json(prompt, max_tokens=1200)
         if data:

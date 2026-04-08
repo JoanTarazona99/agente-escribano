@@ -321,10 +321,20 @@ class TestGenerateSummaryAndAnalysis:
                 assert result["summary"] == "Summary text"
                 assert result["analysis"] == "Analysis text"
 
-    def test_returns_empty_when_no_abstract(self):
+    def test_returns_empty_when_no_title_and_no_abstract(self):
         service = _make_service()
-        result = service._generate_summary_and_analysis("Title", "", "Authors")
+        result = service._generate_summary_and_analysis("", "", "Authors")
         assert result == {}
+
+    def test_generates_metadata_based_when_no_abstract(self):
+        """Sin abstract pero con título, genera resumen basado en metadatos."""
+        service = _make_service()
+        with patch.object(
+            service, "_call_openrouter_json",
+            return_value={"summary": "Metadata-based summary", "analysis": "Metadata-based analysis"},
+        ):
+            result = service._generate_summary_and_analysis("Water Dissociation Study", "", "Authors")
+            assert result.get("summary") == "Metadata-based summary"
 
 
 class TestGenerateAndTranslateSA:
@@ -383,10 +393,31 @@ class TestGenerateAndTranslateSA:
                 result = service._generate_and_translate_sa("Title", "Abstract", "Auth")
                 assert result == {}
 
-    def test_returns_empty_when_no_abstract(self):
+    def test_returns_empty_when_no_title_and_no_abstract(self):
         service = _make_service()
-        result = service._generate_and_translate_sa("Title", "", "Authors")
+        result = service._generate_and_translate_sa("", "", "Authors")
         assert result == {}
+
+    def test_generates_metadata_based_when_no_abstract(self):
+        """Sin abstract pero con título, genera resumen basado en metadatos."""
+        service = _make_service()
+        mega_sa = {
+            "summary_en": "Metadata-based summary",
+            "summary_es": "Resumen basado en metadatos",
+            "summary_ru": "Резюме на основе метаданных",
+            "analysis_en": "Metadata-based analysis",
+            "analysis_es": "Análisis basado en metadatos",
+            "analysis_ru": "Анализ на основе метаданных",
+        }
+        with patch.object(
+            service, "_call_openrouter_json",
+            return_value=mega_sa,
+        ):
+            result = service._generate_and_translate_sa(
+                "Water Dissociation Study", "", "Authors",
+                keywords="water dissociation, membrane", journal="J. Membrane Sci.",
+            )
+            assert result["summary_en"] == "Metadata-based summary"
 
 
 # ── Tests de integración (con DB) ───────────────────────────────────

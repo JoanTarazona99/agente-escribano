@@ -98,6 +98,21 @@ SUMMARIZE_PROMPT = """Составь резюме следующей научн�
 
 Резюме:"""
 
+SUMMARIZE_NO_ABSTRACT_PROMPT = """Составь резюме следующей научной статьи на русском языке.
+У статьи НЕТ доступного абстракта. Основывайся ТОЛЬКО на названии, ключевых словах и журнале.
+
+ВАЖНО:
+- НЕ выдумывай результаты или методологию. Указывай только то, что можно достоверно вывести.
+- Укажи вероятную тему, область исследования и предполагаемый фокус.
+- Используй формулировки: «вероятно рассматривается», «по-видимому посвящена», «можно предположить».
+- ОГРАНИЧЕНИЯ ПО ДЛИНЕ: 100–150 слов.
+
+Название: {title}
+Ключевые слова: {keywords}
+Журнал: {journal}
+
+Резюме:"""
+
 ANALYZE_PROMPT = """Проанализируй статью и верни краткий структурированный отчёт на русском языке.
 
 Требования:
@@ -115,6 +130,25 @@ ANALYZE_PROMPT = """Проанализируй статью и верни кра
 
 Название: {title}
 Аннотация: {abstract}
+
+Анализ:"""
+
+ANALYZE_NO_ABSTRACT_PROMPT = """Проанализируй статью и верни краткий структурированный отчёт на русском языке.
+У статьи НЕТ доступного абстракта. Основывайся ТОЛЬКО на названии, ключевых словах и журнале.
+
+ВАЖНО: НЕ выдумывай конкретные результаты. Используй формулировки «вероятно», «предположительно».
+
+Секции:
+1. **ТИП**: предполагаемый тип (теоретическая / экспериментальная / обзор / смешанная)
+2. **ОБЛАСТЬ**: Предполагаемая область исследования (1-2 предложения)
+3. **ВОЗМОЖНАЯ МЕТОДОЛОГИЯ**: Вероятные методы на основе ключевых слов (1-2 предложения)
+4. **РЕЛЕВАНТНОСТЬ ЭМС**: Возможная связь с диссоциацией/рекомбинацией воды в ЭМС (1-2 предложения)
+5. **ОГРАНИЧЕНИЯ АНАЛИЗА**: Укажи что анализ основан только на метаданных (1 предложение)
+6. **ОЦЕНКА**: N/10 — с пометкой «на основе метаданных»
+
+Название: {title}
+Ключевые слова: {keywords}
+Журнал: {journal}
 
 Анализ:"""
 
@@ -176,57 +210,57 @@ class OllamaService:
 
         return self._chat(prompt, temperature=0.2)
 
-    def summarize(self, title: str, abstract: str) -> str:
+    def summarize(
+        self, title: str, abstract: str,
+        keywords: str = "", journal: str = "",
+    ) -> str:
         """
-        Genera un resumen en español del artículo.
-
-        Args:
-            title: Título del artículo.
-            abstract: Abstract del artículo.
-
-        Returns:
-            Resumen en español (≤150 palabras).
+        Genera un resumen en ruso del artículo.
+        Si no hay abstract, usa título + keywords + journal.
         """
-        if not abstract.strip() and not title.strip():
+        if not title.strip():
             return ""
 
-        prompt = SUMMARIZE_PROMPT.format(
-            title=title or "(sin título)",
-            abstract=abstract or "(sin abstract)",
-        )
+        if abstract and abstract.strip():
+            prompt = SUMMARIZE_PROMPT.format(
+                title=title or "(sin título)",
+                abstract=abstract,
+            )
+        else:
+            # Sin abstract: prompt especial basado en metadatos
+            prompt = SUMMARIZE_NO_ABSTRACT_PROMPT.format(
+                title=title or "(sin título)",
+                keywords=keywords or "(no disponibles)",
+                journal=journal or "(no disponible)",
+            )
         return self._chat(prompt, temperature=0.5)
 
-    def analyze(self, title: str, abstract: str) -> str:
+    def analyze(
+        self, title: str, abstract: str,
+        keywords: str = "", journal: str = "",
+    ) -> str:
         """
-        Genera un análisis estructurado del artículo en español.
-
-        Args:
-            title: Título del artículo.
-            abstract: Abstract del artículo.
-
-        Returns:
-            Análisis estructurado con tipo, metodología, relevancia y hallazgos.
+        Genera un análisis estructurado del artículo en ruso.
+        Si no hay abstract, usa título + keywords + journal.
         """
-        if not abstract.strip() and not title.strip():
+        if not title.strip():
             return ""
 
-        prompt = ANALYZE_PROMPT.format(
-            title=title or "(sin título)",
-            abstract=abstract or "(sin abstract)",
-        )
+        if abstract and abstract.strip():
+            prompt = ANALYZE_PROMPT.format(
+                title=title or "(sin título)",
+                abstract=abstract,
+            )
+        else:
+            prompt = ANALYZE_NO_ABSTRACT_PROMPT.format(
+                title=title or "(sin título)",
+                keywords=keywords or "(no disponibles)",
+                journal=journal or "(no disponible)",
+            )
         result = self._chat(prompt, temperature=0.3)
 
         # Limpiar marca de fin si el modelo la escribió
         result = result.replace("КОНЕЦ", "").strip()
-
-        # Detectar truncamiento: si falta alguna sección, logear advertencia
-        for marker in ["ТИП", "МЕТОДОЛОГИЯ", "КЛЮЧЕВЫЕ РЕЗУЛЬТАТЫ",
-                        "РЕЛЕВАНТНОСТЬ ЭМС", "ОГРАНИЧЕНИЯ", "ОЦЕНКА"]:
-            if marker not in result:
-                self.logger.warning(
-                    "Análisis posiblemente truncado: falta sección '%s'", marker
-                )
-                break
 
         return result
 
@@ -268,10 +302,12 @@ class OllamaService:
             else article.abstract_en or article.abstract_ru or article.abstract_es or article.abstract_original
         )
         best_title = article.title_en or article.title_ru or article.title_es or article.title
+        keywords = getattr(article, "keywords", "") or ""
+        journal = getattr(article, "journal", "") or ""
 
         # Generar resumen y análisis base en ruso
-        summary_ru = self.summarize(best_title, best_abstract)
-        analysis_ru = self.analyze(best_title, best_abstract)
+        summary_ru = self.summarize(best_title, best_abstract, keywords=keywords, journal=journal)
+        analysis_ru = self.analyze(best_title, best_abstract, keywords=keywords, journal=journal)
 
         article.ai_summary_ru = summary_ru
         article.ai_analysis_ru = analysis_ru

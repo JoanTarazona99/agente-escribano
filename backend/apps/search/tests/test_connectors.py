@@ -364,7 +364,8 @@ class TestWOSConnector:
             connector.search("test")
 
     @respx.mock
-    def test_search_returns_articles(self, settings):
+    @patch.object(WOSConnector, "_enrich_with_abstracts", side_effect=lambda arts, proxy: arts)
+    def test_search_returns_articles(self, mock_enrich, settings):
         settings.WOS_API_KEY = "fake-key-12345"
         settings.HTTP_PROXY = ""
 
@@ -394,8 +395,12 @@ class TestWOSConnector:
         assert results[1].doi is None
         assert "WOS:000987654321" in results[1].url
 
+        # Verificar que se intentó enriquecer
+        mock_enrich.assert_called_once()
+
     @respx.mock
-    def test_search_returns_empty_on_no_hits(self, settings):
+    @patch.object(WOSConnector, "_enrich_with_abstracts", side_effect=lambda arts, proxy: arts)
+    def test_search_returns_empty_on_no_hits(self, mock_enrich, settings):
         settings.WOS_API_KEY = "fake-key-12345"
         settings.HTTP_PROXY = ""
 
@@ -434,7 +439,8 @@ class TestWOSConnector:
             WOSConnector().search("test")
 
     @respx.mock
-    def test_retries_on_429(self, settings):
+    @patch.object(WOSConnector, "_enrich_with_abstracts", side_effect=lambda arts, proxy: arts)
+    def test_retries_on_429(self, mock_enrich, settings):
         settings.WOS_API_KEY = "fake-key-12345"
         settings.HTTP_PROXY = ""
 
@@ -450,3 +456,156 @@ class TestWOSConnector:
         results = WOSConnector().search("test")
         assert len(results) == 2
         assert route.call_count == 2
+
+
+class TestWOSDOIScraping:
+    """Tests del scraping de abstracts via DOI en WOSConnector."""
+
+    PUBLISHER_HTML_WITH_ABSTRACT = """
+    <html><body>
+    <div class="abstract">
+        <h2>Abstract</h2>
+        <p>This study investigates the mechanisms of water dissociation in bipolar
+        ion-exchange membranes under applied electric fields. We demonstrate that
+        the catalytic effect of fixed charges at the bipolar junction significantly
+        enhances the rate of water splitting. Experimental results show a 3-fold
+        increase in dissociation rate compared to previous models.</p>
+    </div>
+    </body></html>
+    """
+
+    PUBLISHER_HTML_NO_ABSTRACT = """
+    <html><body>
+    <h1>Article Title</h1>
+    <p>Login required to view full content.</p>
+    </body></html>
+    """
+
+    PUBLISHER_HTML_META_DESCRIPTION = """
+    <html><head>
+    <meta name="description" content="This paper presents a comprehensive analysis of ion transport in electromembrane systems, examining the role of concentration polarization and water splitting phenomena at membrane surfaces under high current densities." />
+    </head><body>
+    <h1>Article</h1>
+    </body></html>
+    """
+
+    @respx.mock
+    def test_scrape_abstract_from_css_selector(self):
+        respx.get("https://doi.org/10.1016/test.2024.001").mock(
+            return_value=httpx.Response(
+                200,
+                text=self.PUBLISHER_HTML_WITH_ABSTRACT,
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        )
+
+        connector = WOSConnector()
+        abstract = connector._scrape_abstract_from_doi("10.1016/test.2024.001", None)
+
+        assert len(abstract) > 50
+        assert "water dissociation" in abstract.lower()
+        assert "bipolar" in abstract.lower()
+
+    @respx.mock
+    def test_scrape_returns_empty_on_no_abstract(self):
+        respx.get("https://doi.org/10.1016/test.2024.002").mock(
+            return_value=httpx.Response(
+                200,
+                text=self.PUBLISHER_HTML_NO_ABSTRACT,
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        )
+
+        connector = WOSConnector()
+        abstract = connector._scrape_abstract_from_doi("10.1016/test.2024.002", None)
+        assert abstract == ""
+
+    @respx.mock
+    def test_scrape_fallback_to_meta_description(self):
+        respx.get("https://doi.org/10.1016/test.2024.003").mock(
+            return_value=httpx.Response(
+                200,
+                text=self.PUBLISHER_HTML_META_DESCRIPTION,
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        )
+
+        connector = WOSConnector()
+        abstract = connector._scrape_abstract_from_doi("10.1016/test.2024.003", None)
+
+        assert len(abstract) > 100
+        assert "ion transport" in abstract.lower()
+
+    @respx.mock
+    def test_scrape_returns_empty_on_http_error(self):
+        respx.get("https://doi.org/10.1016/test.2024.404").mock(
+            return_value=httpx.Response(404, text="Not Found")
+        )
+
+        connector = WOSConnector()
+        abstract = connector._scrape_abstract_from_doi("10.1016/test.2024.404", None)
+        assert abstract == ""
+
+    @respx.mock
+    def test_scrape_returns_empty_on_timeout(self):
+        respx.get("https://doi.org/10.1016/test.timeout").mock(
+            side_effect=httpx.TimeoutException("read timeout")
+        )
+
+        connector = WOSConnector()
+        abstract = connector._scrape_abstract_from_doi("10.1016/test.timeout", None)
+        assert abstract == ""
+
+    @respx.mock
+    def test_enrich_populates_abstract_for_articles_with_doi(self):
+        """_enrich_with_abstracts fills abstract for articles that have DOI."""
+        from apps.search.connectors.base import ArticleData
+
+        respx.get("https://doi.org/10.1016/enrichtest.001").mock(
+            return_value=httpx.Response(
+                200,
+                text=self.PUBLISHER_HTML_WITH_ABSTRACT,
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        )
+
+        articles = [
+            ArticleData(
+                title="Test Article",
+                doi="10.1016/enrichtest.001",
+                abstract="",  # Sin abstract
+                source_db="wos",
+            ),
+            ArticleData(
+                title="No DOI Article",
+                doi=None,
+                abstract="",
+                source_db="wos",
+            ),
+        ]
+
+        connector = WOSConnector()
+        enriched = connector._enrich_with_abstracts(articles, None)
+
+        assert len(enriched) == 2
+        assert enriched[0].abstract != ""  # Enriquecido
+        assert "water dissociation" in enriched[0].abstract.lower()
+        assert enriched[1].abstract == ""  # Sin DOI, no cambia
+
+    def test_enrich_skips_articles_with_existing_abstract(self):
+        """Articles that already have an abstract are not scraped."""
+        from apps.search.connectors.base import ArticleData
+
+        articles = [
+            ArticleData(
+                title="Already has abstract",
+                doi="10.1016/existing.001",
+                abstract="Existing abstract text.",
+                source_db="wos",
+            ),
+        ]
+
+        connector = WOSConnector()
+        # No HTTP mock needed — should not make any request
+        enriched = connector._enrich_with_abstracts(articles, None)
+        assert enriched[0].abstract == "Existing abstract text."

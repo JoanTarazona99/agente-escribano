@@ -6,12 +6,18 @@ Documentación: https://developer.clarivate.com/apis/wos-starter
 Endpoint: GET https://api.clarivate.com/apis/wos-starter/v1/documents
 Autenticación: header X-ApiKey
 Plan: Free trial (Starter), límites en el portal de Clarivate.
+
+Nota: El WOS Starter API NO devuelve abstracts. Este conector intenta
+enriquecer los resultados scrapeando abstracts de las páginas de los
+publishers vía resolución de DOI (ético: solo abstracts públicos,
+respeta rate-limits).
 """
 from __future__ import annotations
 
 import time
 
 import httpx
+from bs4 import BeautifulSoup
 from django.conf import settings
 
 from .base import ArticleData, BaseSearchConnector
@@ -21,6 +27,36 @@ WOS_BASE_URL = "https://api.clarivate.com/apis/wos-starter/v1"
 
 # Rate-limit delay entre reintentos (segundos)
 _RATE_LIMIT_DELAY = 2.0
+
+# Delay entre peticiones de scraping de DOI (ético: respetar publishers)
+_DOI_SCRAPE_DELAY = 1.0
+
+# Timeout para scraping de DOI
+_DOI_SCRAPE_TIMEOUT = httpx.Timeout(connect=8.0, read=10.0, write=5.0, pool=3.0)
+
+# User-Agent para scraping ético
+_SCRAPE_USER_AGENT = "Mozilla/5.0 (compatible; AcademicBot/1.0; scholarly research)"
+
+# Selectores CSS para extraer abstracts de páginas de publishers
+_ABSTRACT_SELECTORS = [
+    # Genéricos
+    "div.abstract", "section.abstract", ".abstract-text",
+    "[class*=\"abstract\"]", "p.Abstract", ".article-abstract",
+    # Elsevier / ScienceDirect
+    "div.abstract.author", ".Abstracts",
+    # Springer
+    "#Abs1-content", "section[data-title=\"Abstract\"]",
+    # Wiley
+    ".article-section__content",
+    # ACS
+    ".articleBody_abstractText",
+    # Taylor & Francis
+    ".abstractSection",
+    # MDPI
+    ".art-abstract",
+    # IOP Science
+    ".article-text .article-content",
+]
 
 
 class WOSConnector(BaseSearchConnector):
@@ -104,7 +140,10 @@ class WOSConnector(BaseSearchConnector):
 
                     resp.raise_for_status()
                     data = resp.json()
-                    return self._parse_response(data)
+                    articles = self._parse_response(data)
+                    # Enriquecer con abstracts scrapeados via DOI
+                    articles = self._enrich_with_abstracts(articles, proxy)
+                    return articles
 
             except httpx.HTTPStatusError as exc:
                 last_error = f"HTTP {exc.response.status_code}"
@@ -273,4 +312,132 @@ class WOSConnector(BaseSearchConnector):
         if uid:
             return f"https://www.webofscience.com/wos/woscc/full-record/{uid}"
         return ""
+
+    # ================================================================
+    # Enriquecimiento de abstracts via DOI scraping
+    # ================================================================
+
+    def _enrich_with_abstracts(
+        self, articles: list[ArticleData], proxy: str | None,
+    ) -> list[ArticleData]:
+        """
+        Intenta scrape del abstract de la página del publisher para cada
+        artículo que tenga DOI y abstract vacío.
+
+        Ético: solo abstracts públicos, User-Agent identificado,
+        delay de 1s entre peticiones.
+        """
+        to_scrape = [a for a in articles if a.doi and not a.abstract]
+        if not to_scrape:
+            return articles
+
+        self.logger.info(
+            "WOS: intentando scraping de abstract para %d/%d artículos con DOI",
+            len(to_scrape), len(articles),
+        )
+
+        enriched = 0
+        for i, article in enumerate(to_scrape):
+            if i > 0:
+                time.sleep(_DOI_SCRAPE_DELAY)  # Rate limit ético
+
+            abstract = self._scrape_abstract_from_doi(article.doi, proxy)
+            if abstract:
+                article.abstract = abstract
+                enriched += 1
+
+        self.logger.info(
+            "WOS: abstracts enriquecidos via DOI: %d/%d exitosos",
+            enriched, len(to_scrape),
+        )
+        return articles
+
+    def _scrape_abstract_from_doi(
+        self, doi: str, proxy: str | None,
+    ) -> str:
+        """
+        Scrapea el abstract de la página del publisher via resolución DOI.
+
+        Args:
+            doi: Identificador DOI del artículo
+            proxy: Proxy HTTP opcional
+
+        Returns:
+            Texto del abstract o cadena vacía si no se encontró
+        """
+        url = f"https://doi.org/{doi}"
+        headers = {
+            "User-Agent": _SCRAPE_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        try:
+            with httpx.Client(
+                timeout=_DOI_SCRAPE_TIMEOUT,
+                proxy=proxy,
+                follow_redirects=True,
+                max_redirects=5,
+            ) as client:
+                resp = client.get(url, headers=headers)
+
+            if resp.status_code != 200:
+                self.logger.debug(
+                    "DOI scrape %s: HTTP %d", doi, resp.status_code,
+                )
+                return ""
+
+            content_type = resp.headers.get("content-type", "")
+            if "text/html" not in content_type:
+                return ""
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Probar cada selector CSS conocido
+            for selector in _ABSTRACT_SELECTORS:
+                elem = soup.select_one(selector)
+                if elem:
+                    text = " ".join(elem.get_text().strip().split())
+                    # Limpiar prefijo "Abstract" si el texto empieza con ello
+                    if text.lower().startswith("abstract"):
+                        text = text[len("abstract"):].lstrip(": ")
+                    if len(text) > 50:  # Abstract real, no un label
+                        abstract = text[:2000]
+                        self.logger.debug(
+                            "DOI scrape %s: abstract encontrado (%d chars, selector=%s)",
+                            doi, len(abstract), selector,
+                        )
+                        return abstract
+
+            # Fallback: buscar <meta name="description"> (muchos publishers lo usan)
+            meta = soup.find("meta", attrs={"name": "description"})
+            if meta:
+                content = meta.get("content", "").strip()
+                if len(content) > 100:
+                    self.logger.debug(
+                        "DOI scrape %s: abstract via meta description (%d chars)",
+                        doi, len(content),
+                    )
+                    return content[:2000]
+
+            # Fallback: buscar <meta property="og:description">
+            og_meta = soup.find("meta", attrs={"property": "og:description"})
+            if og_meta:
+                content = og_meta.get("content", "").strip()
+                if len(content) > 100:
+                    self.logger.debug(
+                        "DOI scrape %s: abstract via og:description (%d chars)",
+                        doi, len(content),
+                    )
+                    return content[:2000]
+
+            self.logger.debug("DOI scrape %s: no se encontró abstract", doi)
+            return ""
+
+        except httpx.TimeoutException:
+            self.logger.debug("DOI scrape %s: timeout", doi)
+            return ""
+        except Exception as e:
+            self.logger.debug("DOI scrape %s: error %s", doi, e)
+            return ""
 
