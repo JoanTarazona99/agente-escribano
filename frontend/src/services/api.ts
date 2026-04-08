@@ -108,12 +108,11 @@ export async function updateArticle(id: number, fields: Partial<Article>): Promi
 }
 
 /** Health check del sistema (Ollama, BD, stats). */
-export interface HealthResponse {
+110 export interface HealthResponse {
   database: { ok: boolean; error?: string };
-  ollama: { ok: boolean; model: string; available_models?: string[]; model_loaded?: boolean; error?: string };
-  stats: { total_articles: number; ai_processed: number };
+  llm: { ok: boolean; provider: string; configured: boolean; model?: string; error?: string };
+  stats: { total_articles: number; ai_processed: number; ai_processing?: number; ai_failed?: number };
 }
-
 export async function getHealth(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>("/health/");
   return data;
@@ -143,7 +142,7 @@ export async function getNotebook(id: number): Promise<Notebook> {
 }
 
 /** Actualiza un cuaderno. */
-export async function updateNotebook(
+export async function updateNotebook(111
   id: number,
   data: { title?: string; description?: string }
 ): Promise<Notebook> {
