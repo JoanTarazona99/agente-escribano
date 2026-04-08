@@ -54,7 +54,9 @@
     "rename": "Rename",
     "delete": "Delete article",
     "confirm_delete": "Are you sure you want to delete this article? This action cannot be undone.",
-    "full_text": "Extracted full text"
+    "full_text": "Extracted full text",
+    "language": "Language",
+    "words_approx": "words approx."
   },
   "article_type": {
     "theoretical": "Theoretical",

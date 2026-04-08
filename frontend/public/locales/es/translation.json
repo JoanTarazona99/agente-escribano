@@ -54,7 +54,9 @@
     "rename": "Renombrar artículo",
     "delete": "Eliminar artículo",
     "confirm_delete": "¿Seguro que deseas eliminar este artículo? Esta acción no se puede deshacer.",
-    "full_text": "Texto completo extraído"
+    "full_text": "Texto completo extraído",
+    "language": "Idioma",
+    "words_approx": "palabras aprox."
   },
   "article_type": {
     "theoretical": "Teórico",

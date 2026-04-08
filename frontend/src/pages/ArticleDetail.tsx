@@ -99,19 +99,36 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
         </a>
       )}
 
-      {abstract && (
+      {/* For file sources: compact info card instead of full abstract/text */}
+      {article.source_db === "file" && (
+        <section className="detail__section detail__file-info">
+          <div className="detail__file-stats">
+            {article.language_original && (
+              <span className="detail__file-stat">
+                🌐 {t("article.language")}: {article.language_original.toUpperCase()}
+              </span>
+            )}
+            {article.full_text && (
+              <span className="detail__file-stat">
+                📝 {Math.round(article.full_text.length / 5).toLocaleString()} {t("article.words_approx")}
+              </span>
+            )}
+            {article.created_at && (
+              <span className="detail__file-stat">
+                📅 {new Date(article.created_at).toLocaleDateString(i18n.language)}
+              </span>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Abstract only for non-file sources */}
+      {article.source_db !== "file" && abstract && (
         <section className="detail__section">
           <h2>{t("article.abstract")}</h2>
           <p className="detail__abstract">
             <MathText text={abstract} />
           </p>
-        </section>
-      )}
-
-      {article.source_db === "file" && article.full_text && article.full_text !== abstract && (
-        <section className="detail__section">
-          <h2>{t("article.full_text")}</h2>
-          <pre className="detail__full-text">{article.full_text}</pre>
         </section>
       )}
 

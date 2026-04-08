@@ -238,3 +238,25 @@
 }
 
 .detail__loading { color: var(--color-text-muted); font-size: 0.9rem; }
+
+/* ── File source compact info ─────────────────────────── */
+.detail__file-info {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.detail__file-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.detail__file-stat {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
