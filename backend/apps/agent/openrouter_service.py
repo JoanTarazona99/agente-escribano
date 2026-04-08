@@ -31,6 +31,7 @@ from typing import Optional
 
 import httpx
 from django.conf import settings
+from django.core.cache import cache
 
 from apps.articles.models import Article
 
@@ -108,6 +109,9 @@ _RETRY_BASE_DELAY = 1.5
 # que deja margen frente al timeout de django-q2 (300s) para que el except
 # pueda limpiar la BD antes del kill.
 _CALL_DEADLINE = 120.0
+# TTL del cache para el modelo disponible (segundos). Se re-prueba cada 5 min.
+_PROBE_CACHE_TTL = 300
+_PROBE_CACHE_KEY = "openrouter_available_model"
 
 
 class OpenRouterService:
@@ -212,6 +216,89 @@ class OpenRouterService:
         self.timeout = httpx.Timeout(connect=10.0, read=50.0, write=10.0, pool=5.0)
 
     # ================================================================
+    # Probe: detectar modelo disponible en tiempo real
+    # ================================================================
+    def probe_available_model(self, force: bool = False) -> str:
+        """
+        Detecta el primer modelo de OpenRouter disponible (sin 429).
+        Resultado cacheado _PROBE_CACHE_TTL segundos para evitar ping en
+        cada llamada. Llamar con force=True para invalidar el cache.
+
+        Returns:
+            str: model ID del primer modelo que responde sin error.
+        """
+        if not force:
+            cached = cache.get(_PROBE_CACHE_KEY)
+            if cached:
+                logger.debug("Probe cache hit: %s", cached)
+                return cached
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://agente-escribano.onrender.com",
+            "X-Title": "Agente Escribano - Universidad",
+            "Content-Type": "application/json",
+        }
+        probe_timeout = httpx.Timeout(connect=8.0, read=15.0, write=5.0, pool=3.0)
+        models_to_probe = [self.model] + [
+            m for m in self._fallback_models if m != self.model
+        ]
+        logger.info(
+            "Probe iniciado: verificando %d modelos en OpenRouter...",
+            len(models_to_probe),
+        )
+        for model in models_to_probe:
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 1,
+                "temperature": 0,
+            }
+            try:
+                with httpx.Client(timeout=probe_timeout) as client:
+                    resp = client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                if resp.status_code == 429:
+                    logger.debug("Probe: %s -> 429 (rate limited)", model)
+                    continue
+                if resp.status_code in (401, 403):
+                    logger.warning("Probe: auth error %d. Abortando.", resp.status_code)
+                    break
+                if resp.status_code == 404:
+                    logger.debug("Probe: %s -> 404 (no existe)", model)
+                    continue
+                if resp.status_code >= 400:
+                    logger.debug("Probe: %s -> %d", model, resp.status_code)
+                    continue
+                # 2xx -> modelo disponible
+                logger.info("Probe OK: modelo disponible -> %s", model)
+                cache.set(_PROBE_CACHE_KEY, model, timeout=_PROBE_CACHE_TTL)
+                if model != self.model:
+                    logger.info(
+                        "Probe: actualizando self.model %s -> %s",
+                        self.model,
+                        model,
+                    )
+                    self.model = model
+                return model
+            except httpx.TimeoutException:
+                logger.debug("Probe: %s -> timeout", model)
+                continue
+            except Exception as e:
+                logger.debug("Probe: %s -> error: %s", model, e)
+                continue
+
+        # Ninguno disponible: usar el modelo configurado por defecto
+        logger.warning(
+            "Probe: todos los modelos no disponibles. Usando configurado: %s",
+            self.model,
+        )
+        return self.model
+
+    # ================================================================
     # Punto de entrada principal
     # ================================================================
 
@@ -231,6 +318,8 @@ class OpenRouterService:
         if not self.api_key:
             logger.warning("OPENROUTER_API_KEY no configurada. Saltando analisis.")
             return {}
+                  # Detectar modelo disponible antes de procesar (cache 5min)
+        self.probe_available_model()
 
         result: dict = {}
         lang = article.language_original or "en"
