@@ -59,8 +59,11 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
 
       <div className="detail__header">
         <span className={`badge badge--${article.source_db || ""}`}>
-          {article.source_db?.toUpperCase() || ""}
+          {article.source_db === "file" ? "📄 FILE" : (article.source_db?.toUpperCase() || "")}
         </span>
+        {article.source_db === "file" && article.original_filename && (
+          <span className="detail__filename">{article.original_filename}</span>
+        )}
         {article.article_type && article.article_type !== "unknown" && (
           <span className="detail__type">{t(`article_type.${article.article_type}`)}</span>
         )}
@@ -102,6 +105,13 @@ export default function ArticleDetail({ articleId, onClose }: ArticleDetailProps
           <p className="detail__abstract">
             <MathText text={abstract} />
           </p>
+        </section>
+      )}
+
+      {article.source_db === "file" && article.full_text && article.full_text !== abstract && (
+        <section className="detail__section">
+          <h2>{t("article.full_text")}</h2>
+          <pre className="detail__full-text">{article.full_text}</pre>
         </section>
       )}
 

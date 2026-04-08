@@ -53,7 +53,8 @@
     "more_options": "More options",
     "rename": "Rename",
     "delete": "Delete article",
-    "confirm_delete": "Are you sure you want to delete this article? This action cannot be undone."
+    "confirm_delete": "Are you sure you want to delete this article? This action cannot be undone.",
+    "full_text": "Extracted full text"
   },
   "article_type": {
     "theoretical": "Theoretical",
@@ -118,13 +119,17 @@
     "click_to_rename": "Double-click to rename",
     "search_placeholder": "Search arXiv, eLIBRARY, Scopus…",
     "drop_or_click": "Drop files here or click to select",
-    "drop_formats": "PDF, images, documents and audio, and more",
+    "drop_formats": "PDF, TXT, DOCX (max 20 MB)",
+    "uploading_files": "Uploading files…",
+    "file_uploaded": "File {{name}} uploaded successfully",
+    "upload_error": "Error uploading {{name}}: {{error}}",
     "studio": "Studio",
     "studio_desc": "AI analysis tools",
     "ai_tools": "AI Tools",
     "select_to_analyze": "Select an article to analyze",
     "chat": "Chat",
-    "chat_placeholder": "Ask about this article…"
+    "chat_placeholder": "Ask about this article…",
+    "uploaded_files": "Uploaded files"
   },
   "common": {
     "loading": "Loading…",

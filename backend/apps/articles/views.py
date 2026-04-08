@@ -321,7 +321,11 @@ class NotebookViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         summary="Subir archivo al cuaderno",
-        description="Sube un archivo (PDF, TXT, etc.) y lo añade como artículo al cuaderno.",
+        description=(
+            "Sube un archivo (PDF, TXT, DOCX) y lo añade como fuente al cuaderno. "
+            "El texto se extrae automáticamente y queda disponible para análisis IA, "
+            "igual que los artículos obtenidos por búsqueda."
+        ),
         request={"multipart/form-data": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}}},
         responses={201: ArticleDetailSerializer},
     )
@@ -337,44 +341,116 @@ class NotebookViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Extraer el texto del archivo según su tipo
+        # Validar tamaño (máximo 20 MB)
+        MAX_FILE_SIZE = 20 * 1024 * 1024
+        if file_obj.size and file_obj.size > MAX_FILE_SIZE:
+            return Response(
+                {"detail": "El archivo excede el tamaño máximo de 20 MB."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         filename = file_obj.name
         file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        content = ""
+        SUPPORTED_EXTENSIONS = {"pdf", "txt", "doc", "docx", "md", "tex", "rtf"}
 
-        try:
-            if file_ext == "pdf":
-                # Extraer texto de PDF usando PyPDF2 o similar
-                try:
-                    import PyPDF2
-                    import io
-                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_obj.read()))
-                    content = "\n".join([page.extract_text() for page in pdf_reader.pages])
-                except ImportError:
-                    content = "[No se pudo extraer texto - PyPDF2 no instalado]"
-            elif file_ext == "txt":
-                content = file_obj.read().decode("utf-8", errors="ignore")
-            elif file_ext in ["doc", "docx"]:
-                # Podrías usar python-docx aquí
-                content = "[Archivo Word - extractor no implementado]"
-            else:
-                content = f"[Archivo {file_ext} - tipo no soportado]"
-        except Exception as e:
-            logger.error(f"Error al procesar archivo {filename}: {e}")
-            content = f"[Error al extraer texto: {str(e)}]"
+        if file_ext not in SUPPORTED_EXTENSIONS:
+            return Response(
+                {"detail": f"Tipo de archivo '.{file_ext}' no soportado. Usa: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        # Crear el artículo con el contenido extraído
+        content = self._extract_text(file_obj, file_ext, filename)
+
+        if not content or content.startswith("[Error"):
+            logger.warning(f"No se pudo extraer texto del archivo {filename}")
+            # Aún así crear el artículo para que el usuario pueda renombrarlo/editarlo
+            if not content:
+                content = ""
+
+        # Generar título legible a partir del nombre de archivo
+        title = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
+
+        # Crear el artículo: abstract_original = primeros 2000 chars, full_text = todo
+        abstract_preview = content[:2000].strip() if content else ""
+
         article = Article.objects.create(
-            title=filename,
-            authors="Usuario local",
-            abstract_original=content[:5000],  # Limitar a 5000 caracteres para el abstract
-            source_db="unknown",
+            title=title,
+            authors="",
+            abstract_original=abstract_preview,
+            full_text=content,
+            original_filename=filename,
+            source_db="file",
             source_id=f"file:{filename}",
+            language_original=self._detect_language(content[:500]) if content else "",
         )
 
         # Añadir al cuaderno
         notebook.articles.add(article)
 
         serializer = ArticleDetailSerializer(article)
-        logger.info(f"📄 Archivo {filename} subido como artículo #{article.pk} al notebook #{notebook.pk}")
+        logger.info(f"📄 Archivo '{filename}' subido como fuente #{article.pk} al notebook #{notebook.pk} ({len(content)} chars)")
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _extract_text(file_obj, file_ext: str, filename: str) -> str:
+        """Extrae texto de un archivo según su extensión."""
+        import io
+
+        try:
+            if file_ext == "pdf":
+                try:
+                    import PyPDF2
+                    pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_obj.read()))
+                    pages = []
+                    for page in pdf_reader.pages:
+                        text = page.extract_text()
+                        if text:
+                            pages.append(text)
+                    return "\n\n".join(pages)
+                except ImportError:
+                    logger.error("PyPDF2 no está instalado")
+                    return "[Error: PyPDF2 no instalado — ejecuta pip install PyPDF2]"
+
+            elif file_ext in ("txt", "md", "tex", "rtf"):
+                raw = file_obj.read()
+                # Intentar UTF-8, luego latin-1 como fallback
+                for encoding in ("utf-8", "latin-1", "cp1252"):
+                    try:
+                        return raw.decode(encoding)
+                    except (UnicodeDecodeError, AttributeError):
+                        continue
+                return raw.decode("utf-8", errors="ignore")
+
+            elif file_ext in ("doc", "docx"):
+                try:
+                    from docx import Document
+                    doc = Document(io.BytesIO(file_obj.read()))
+                    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                    return "\n\n".join(paragraphs)
+                except ImportError:
+                    logger.error("python-docx no está instalado")
+                    return "[Error: python-docx no instalado — ejecuta pip install python-docx]"
+
+            else:
+                return f"[Formato .{file_ext} no soportado]"
+
+        except Exception as e:
+            logger.error(f"Error al procesar archivo {filename}: {e}")
+            return f"[Error al extraer texto: {str(e)}]"
+
+    @staticmethod
+    def _detect_language(text: str) -> str:
+        """Detección simple de idioma basada en caracteres."""
+        if not text:
+            return ""
+        # Contar caracteres cirílicos vs latinos
+        cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04ff")
+        latin = sum(1 for c in text if "a" <= c.lower() <= "z")
+        # Palabras frecuentes en español
+        es_markers = sum(1 for w in ("de", "en", "la", "el", "los", "las", "del", "una", "por", "con")
+                         if f" {w} " in text.lower())
+        if cyrillic > latin * 0.3:
+            return "ru"
+        if es_markers > 5:
+            return "es"
+        return "en"

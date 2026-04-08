@@ -554,7 +554,7 @@ export default function Notebook() {
                     id="nb-file-input"
                     type="file"
                     multiple
-                    accept=".pdf,.txt,.doc,.docx,.png,.jpg,.jpeg,.mp3,.mp4,.wav"
+                    accept=".pdf,.txt,.doc,.docx,.md,.tex,.rtf"
                     style={{ display: "none" }}
                     onChange={handleFileInput}
                   />
@@ -631,6 +631,7 @@ export default function Notebook() {
                     <option value="elibrary">eLIBRARY</option>
                     <option value="scopus">Scopus</option>
                     <option value="wos">WOS</option>
+                    <option value="file">📄 {t("notebook.uploaded_files") || "Files"}</option>
                   </select>
                 </div>
               </div>

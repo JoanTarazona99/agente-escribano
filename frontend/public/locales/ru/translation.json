@@ -53,7 +53,8 @@
     "more_options": "Дополнительные опции",
     "rename": "Переименовать",
     "delete": "Удалить статью",
-    "confirm_delete": "Вы уверены, что хотите удалить эту статью? Это действие нельзя отменить."
+    "confirm_delete": "Вы уверены, что хотите удалить эту статью? Это действие нельзя отменить.",
+    "full_text": "Полный текст"
   },
   "article_type": {
     "theoretical": "Теоретическая",
@@ -118,7 +119,7 @@
     "click_to_rename": "Двойной клик для переименования",
     "search_placeholder": "Поиск в arXiv, eLIBRARY, Scopus…",
     "drop_or_click": "Перетащите файлы или нажмите для выбора",
-    "drop_formats": "PDF, изображения, документы и аудио, и другие",
+    "drop_formats": "PDF, TXT, DOCX (макс. 20 МБ)",
         "uploading_files": "Загружаем файлы...",
     "file_uploaded": "Файл {{name}} загружен",
     "upload_error": "Ошибка загрузки {{name}}: {{error}}",
@@ -127,7 +128,8 @@
     "ai_tools": "Инструменты ИИ",
     "select_to_analyze": "Выберите статью для анализа",
     "chat": "Чат",
-    "chat_placeholder": "Спросите об этой статье…"
+    "chat_placeholder": "Спросите об этой статье…",
+    "uploaded_files": "Загруженные файлы"
   },
   "common": {
     "loading": "Загрузка…",

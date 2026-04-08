@@ -98,4 +98,5 @@ a:hover { text-decoration: underline; }
 .badge--scopus   { background: #1a3333; color: #5eead4; }
 .badge--wos      { background: #2d1b4e; color: #c084fc; }
 .badge--elibrary { background: #3d1f0f; color: #fb923c; }
+.badge--file     { background: #1a2e1a; color: #86efac; }
 .badge--unknown  { background: #27272a; color: #71717a; }

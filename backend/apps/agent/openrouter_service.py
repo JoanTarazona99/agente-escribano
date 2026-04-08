@@ -323,22 +323,25 @@ class OpenRouterService:
 
         result: dict = {}
         lang = article.language_original or "en"
+        # Para archivos subidos, usar full_text como fuente principal
+        full_text = getattr(article, "full_text", "") or ""
 
         try:
             # -- Paso 1: traducir titulo + abstract a ES/EN/RU (1 llamada) --
+            text_for_translation = full_text[:3000] if full_text else article.abstract_original
             need_tr = (
                 (article.title and any(
                     not getattr(article, f"title_{l}")
                     for l in ("es", "en", "ru") if l != lang
                 ))
-                or (article.abstract_original and any(
+                or (text_for_translation and any(
                     not getattr(article, f"abstract_{l}")
                     for l in ("es", "en", "ru") if l != lang
                 ))
             )
             if need_tr:
                 tr = self._batch_translate(
-                    article.title, article.abstract_original, lang,
+                    article.title, text_for_translation or article.abstract_original, lang,
                 )
                 for key in (
                     "title_es", "title_en", "title_ru",
@@ -351,7 +354,8 @@ class OpenRouterService:
 
             # -- Paso 2: generar resumen + analisis EN (1 llamada) --
             best_abstract = (
-                article.abstract_en
+                full_text[:4000] if full_text
+                else article.abstract_en
                 or article.abstract_original
                 or article.title
             )

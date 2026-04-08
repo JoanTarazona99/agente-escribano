@@ -240,7 +240,9 @@ class OllamaService:
         """
         self.logger.info("Procesando artículo ID=%s: %s", article.pk, article.title[:60])
 
-        text_for_translation = article.abstract_original or article.title
+        # Para archivos subidos, usar full_text como fuente principal de contenido
+        full_text = getattr(article, "full_text", "") or ""
+        text_for_translation = full_text[:3000] if full_text else (article.abstract_original or article.title)
         lang = article.language_original or "ru"
 
         # Traducciones (solo si no están en el idioma ya)
@@ -260,7 +262,11 @@ class OllamaService:
             article.title_ru = self.translate(article.title, target_lang="ru")
 
         # Resumen y análisis — generar en RU y traducir a ES/EN
-        best_abstract = article.abstract_en or article.abstract_ru or article.abstract_es or article.abstract_original
+        # Para archivos subidos con full_text, usar todo el contenido disponible
+        best_abstract = (
+            full_text[:4000] if full_text
+            else article.abstract_en or article.abstract_ru or article.abstract_es or article.abstract_original
+        )
         best_title = article.title_en or article.title_ru or article.title_es or article.title
 
         # Generar resumen y análisis base en ruso

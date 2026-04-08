@@ -89,6 +89,32 @@
 }
 
 /* ── Botón PDF ──────────────────────────────────────────── */
+
+.detail__filename {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.detail__full-text {
+  line-height: 1.6;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--color-surface-alt);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono, monospace);
+}
+
 .detail__pdf-btn {
   display: inline-flex;
   align-items: center;

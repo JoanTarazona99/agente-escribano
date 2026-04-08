@@ -4,6 +4,7 @@
   --accent-elibrary: #fb923c;
   --accent-scopus:   #2dd4bf;
   --accent-wos:      #a78bfa;
+  --accent-file:     #4ade80;
   --accent-unknown:  #52525b;
 }
 
@@ -46,6 +47,7 @@
 .article-card--elibrary .article-card__accent { background: var(--accent-elibrary); }
 .article-card--scopus   .article-card__accent { background: var(--accent-scopus); }
 .article-card--wos      .article-card__accent { background: var(--accent-wos); }
+.article-card--file    .article-card__accent { background: var(--accent-file); }
 .article-card--unknown  .article-card__accent { background: var(--accent-unknown); }
 
 /* ── Body ────────────────────────────────────────────────── */

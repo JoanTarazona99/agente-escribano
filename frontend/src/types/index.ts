@@ -1,6 +1,6 @@
 /** Tipos TypeScript que reflejan los modelos Django. */
 
-export type SourceDatabase = "scopus" | "wos" | "arxiv" | "elibrary" | "unknown";
+export type SourceDatabase = "scopus" | "wos" | "arxiv" | "elibrary" | "file" | "unknown";
 export type ArticleType = "theoretical" | "experimental" | "review" | "mixed" | "unknown";
 
 export interface Article {
@@ -39,6 +39,8 @@ export interface Article {
   ai_analysis_en?: string;
   ai_analysis_ru?: string;
   source_id?: string;
+  full_text?: string;
+  original_filename?: string;
   updated_at?: string;
 }
 

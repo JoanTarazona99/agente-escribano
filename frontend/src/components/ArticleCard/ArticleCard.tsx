@@ -100,7 +100,7 @@ export default function ArticleCard({ article, isSelected = false, onSelect, onD
       <div className="article-card__body">
         <div className="article-card__header">
           <span className={`badge badge--${article.source_db}`}>
-            {article.source_db.toUpperCase()}
+            {article.source_db === "file" ? "📄 FILE" : article.source_db.toUpperCase()}
           </span>
           {article.language_original && (
             <span className="article-card__lang">

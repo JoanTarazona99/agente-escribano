@@ -11,6 +11,7 @@ class SourceDatabase(models.TextChoices):
     WOS = "wos", _("Web of Science")
     ARXIV = "arxiv", _("arXiv")
     ELIBRARY = "elibrary", _("eLIBRARY")
+    FILE = "file", _("Archivo local")
     UNKNOWN = "unknown", _("Desconocido")
 
 
@@ -76,6 +77,19 @@ class Article(models.Model):
         blank=True,
         default="",
         help_text="Palabras clave separadas por comas.",
+    )
+    full_text = models.TextField(
+        _("Texto completo"),
+        blank=True,
+        default="",
+        help_text="Texto completo extraído del archivo subido (PDF, TXT, DOCX).",
+    )
+    original_filename = models.CharField(
+        _("Nombre del archivo original"),
+        max_length=512,
+        blank=True,
+        default="",
+        help_text="Nombre del archivo subido por el usuario.",
     )
 
     # ─── Clasificación ────────────────────────────────────

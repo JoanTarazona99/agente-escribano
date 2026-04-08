@@ -57,6 +57,7 @@ class ArticleListSerializer(serializers.ModelSerializer):
             "abstract_es",
             "abstract_en",
             "abstract_ru",
+            "original_filename",
         ]
         read_only_fields = ["id", "created_at"]
 
