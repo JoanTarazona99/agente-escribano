@@ -132,13 +132,26 @@ class ArticleViewSet(
         article = self.get_object()
         force = request.query_params.get("force", "").lower() == "true"
 
-        # Si ya está en proceso, no encolar de nuevo
+# Si ya esta en proceso, verificar si esta atascado (>5 min sin respuesta)
         if article.ai_processing:
-            return Response(
-                {"status": "processing", "detail": "El análisis ya está en curso."},
-                status=status.HTTP_202_ACCEPTED,
-            )
-
+            stale_cutoff = timezone.now() - timedelta(minutes=5)
+            if article.updated_at < stale_cutoff:
+                # Worker murio sin limpiar - auto-reset y re-encolar
+                logger.warning(
+                    "Articulo %s atascado (>5 min). Auto-reset y re-encolar.",
+                    article.pk,
+                )
+                Article.objects.filter(pk=article.pk).update(
+                    ai_processing=False,
+                    ai_error="",
+                    ai_error_code="",
+                )
+                article.refresh_from_db()
+            else:
+                return Response(
+                    {"status": "processing", "detail": "El analisis ya esta en curso."},
+                    status=status.HTTP_202_ACCEPTED,
+                )
         # Marcar como en cola inmediatamente para que el frontend lo detecte
         article.ai_processing = True
         article.ai_error = ""
