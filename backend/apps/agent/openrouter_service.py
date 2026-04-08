@@ -8,7 +8,7 @@ Documentacion: https://openrouter.ai/docs
 Optimizado: 2 llamadas API batch con mega-prompt (20s + 50s = 70s << 300s timeout).
 
 Resilencia en free tier (basado en datos reales, Abril 2026):
-  - Modelo principal: qwen/qwen3.6-plus:free (MÁS estable, 34 requests OK)
+  - Modelo principal: stepfun/step-3.5-flash:free (modelo principal, Abril 2026)
   - Fallbacks: qwen2.5 → deepseek-r1 → llama → gemma → nvidia
   - Problema: gemma/llama comparten pools globales, 429 frecuente (upstream OpenRouter)
   - Nota: los 429 son pool-wide, NO de tu cuenta — todos los usuarios afectados
@@ -18,7 +18,7 @@ Resilencia en free tier (basado en datos reales, Abril 2026):
   - Deadline global: 120s
 
 Configuración (.env):
-  OPENROUTER_MODEL=qwen/qwen3.6-plus:free  (defecto)
+  OPENROUTER_MODEL=stepfun/step-3.5-flash:free  (defecto)
   OPENROUTER_MODEL_PREMIUM=  (opcional, ej: openai/gpt-4-turbo)
   Nota: Modelos fallback se cargan dinámicamente desde config/llm_models.json
 """
@@ -89,8 +89,8 @@ _AI_UPDATE_FIELDS = [
 # Nota: OpenRouter cambia disponibilidad frecuentemente. Ver documentación para lista actualizada.
 # Se actualiza diariamente por task django-q2 en config/llm_models.json
 _FALLBACK_MODELS = [
-    "qwen/qwen3.6-plus:free",                         # 1º más estable (34 requests OK)
-    "qwen/qwen2.5-72b-instruct:free",                 # 2º alternativa Qwen
+    "stepfun/step-3.5-flash:free",                         # 1º más estable (34 requests OK)
+    "openai/gpt-oss-120b:free",                 # 2º alternativa Qwen
     "deepseek/deepseek-r1:free",                      # 3º muy capaz
     "meta-llama/llama-3.3-70b-instruct:free",         # 4º (429 frecuente)
     "google/gemma-3-27b-it:free",                     # 5º (429 frecuente)
