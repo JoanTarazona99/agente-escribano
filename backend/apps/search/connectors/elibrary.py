@@ -395,6 +395,12 @@ class ElibraryConnector(BaseSearchConnector):
 
             parsed = urlparse(str(r1.url))
             final_host = f"{parsed.scheme}://{parsed.netloc}"
+            self.logger.warning(
+                "eLIBRARY debug: final_url=%s title=%s html_head=%r",
+                r1.url,
+                BeautifulSoup(r1.text, "html.parser").title.get_text(strip=True) if BeautifulSoup(r1.text, "html.parser").title else "",
+                r1.text[:1200],
+            )
             return self._parse_results(r1.text, max_results, final_host)
 
         self.logger.error(
@@ -413,13 +419,34 @@ class ElibraryConnector(BaseSearchConnector):
         host: str = "https://www.elibrary.ru",
     ) -> list[ArticleData]:
         soup = BeautifulSoup(html, "html.parser")
+
         table = soup.find("table", id="restab")
+
         if not table:
-            self.logger.warning("eLIBRARY: tabla #restab no encontrada.")
+            for candidate in soup.find_all("table"):
+                headers_text = " ".join(
+                    th.get_text(" ", strip=True) for th in candidate.find_all(["th", "td"])[:10]
+                )
+                if "Публикация" in headers_text and ("Цит." in headers_text or "Цит" in headers_text):
+                    table = candidate
+                    self.logger.warning(
+                        "eLIBRARY: tabla #restab no encontrada; usando tabla alternativa."
+                    )
+                    break
+
+        if not table:
+            title = soup.title.get_text(strip=True) if soup.title else ""
+            body_text = soup.get_text(" ", strip=True)[:1000]
+            self.logger.warning(
+                "eLIBRARY: no se encontro tabla de resultados. title=%r body=%r",
+                title,
+                body_text,
+            )
             return []
 
         articles: list[ArticleData] = []
-        for row in table.find_all("tr")[1:]:
+
+        for row in table.find_all("tr"):
             title_link = row.find("a", href=re.compile(r"/item\.asp"))
             if not title_link:
                 continue
@@ -436,20 +463,22 @@ class ElibraryConnector(BaseSearchConnector):
             if m:
                 source_id = m.group(1)
 
+            row_text = row.get_text(" ", strip=True)
+
             authors = ""
-            for font_tag in row.find_all("font", color="#00008f"):
-                italic = font_tag.find("i")
-                if italic:
-                    authors = italic.get_text(separator=", ", strip=True)
+            for tag in row.find_all(["font", "div", "span", "td"]):
+                txt = tag.get_text(" ", strip=True)
+                if txt and "," in txt and len(txt) < 300 and re.search(r"[А-ЯA-Z][а-яa-z\-]+", txt):
+                    authors = txt
                     break
 
             journal = ""
-            jlinks = row.find_all("a", href=re.compile(r"contents\.asp"))
-            if jlinks:
-                journal = jlinks[0].get_text(strip=True)
+            jlink = row.find("a", href=re.compile(r"contents\.asp"))
+            if jlink:
+                journal = jlink.get_text(strip=True)
 
-            year: int | None = None
-            ym = re.search(r"\b(19|20)\d{2}\b", row.get_text())
+            year = None
+            ym = re.search(r"\b(19|20)\d{2}\b", row_text)
             if ym:
                 year = int(ym.group())
 
