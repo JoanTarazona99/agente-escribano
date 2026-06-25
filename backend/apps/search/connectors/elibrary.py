@@ -2,18 +2,23 @@
 Conector para eLIBRARY.ru - scraping con curl_cffi (impersona Chrome 120).
 
 CAPTCHA: eLIBRARY lo lanza cuando el servidor no reconoce la sesion.
-  La sesion se identifica por cookies (no solo por IP). Solucion:
-    1. Persistir cookies en disco entre ejecuciones (_COOKIE_FILE).
-    2. Si se detecta CAPTCHA, abrir la URL en el navegador del sistema
-       y reintentar hasta _CAPTCHA_RETRIES veces.
+La sesion se identifica por cookies (no solo por IP). Solucion:
+1. Persistir cookies en disco entre ejecuciones (_COOKIE_FILE).
+2. Si se detecta CAPTCHA en local, abrir la URL en el navegador del sistema
+   y reintentar hasta _CAPTCHA_RETRIES veces.
+3. En Render/produccion (headless), NO intentar abrir navegador; tratar la
+   fuente como temporalmente no disponible.
+
 Flujo:
-    1. GET www.elibrary.ru/defaultx.asp  - obtener cookies + campos ocultos
-    2. POST www.elibrary.ru/query_results.asp  - accion real del formulario
-    3. Parsear table#restab en la respuesta directa del POST.
+1. GET www.elibrary.ru/defaultx.asp - obtener cookies + campos ocultos
+2. POST www.elibrary.ru/query_results.asp - accion real del formulario
+3. Parsear table#restab en la respuesta directa del POST.
 """
+
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import webbrowser
@@ -38,18 +43,19 @@ from django.conf import settings
 
 from .base import ArticleData, BaseSearchConnector
 
-_ELIBRARY_HOST  = "https://www.elibrary.ru"
-_HOME_URL       = f"{_ELIBRARY_HOST}/defaultx.asp"
-_RESULTS_URL    = f"{_ELIBRARY_HOST}/query_results.asp"
+_ELIBRARY_HOST = "https://www.elibrary.ru"
+_HOME_URL = f"{_ELIBRARY_HOST}/defaultx.asp"
+_RESULTS_URL = f"{_ELIBRARY_HOST}/query_results.asp"
 _CAPTCHA_MARKER = "page_captcha.asp"
 
-_COOKIE_FILE      = Path(settings.BASE_DIR) / ".elibrary_cookies.json"
-_CAPTCHA_WAIT_SECS = 30   # cuánto esperar tras abrir el navegador
-_CAPTCHA_RETRIES   = 3    # reintentos DESPUÉS de la espera (sin abrir navegador de nuevo)
+_COOKIE_FILE = Path(settings.BASE_DIR) / ".elibrary_cookies.json"
+_CAPTCHA_WAIT_SECS = 30
+_CAPTCHA_RETRIES = 3
+_HOME_TIMEOUT = 35
+_POST_TIMEOUT = 45
 
 
 class ElibraryConnector(BaseSearchConnector):
-
     SOURCE_DB = "elibrary"
 
     _BASE_HEADERS = {
@@ -80,6 +86,7 @@ class ElibraryConnector(BaseSearchConnector):
         if not _CURL_CFFI_AVAILABLE:
             self.logger.error("curl_cffi no instalado. Ejecute: pip install curl-cffi")
             return []
+
         self.logger.info("eLIBRARY search: %r (max=%d)", query, max_results)
         try:
             return self._do_search(query, max_results)
@@ -88,40 +95,69 @@ class ElibraryConnector(BaseSearchConnector):
             return []
 
     # ------------------------------------------------------------------
+    # Entorno / headless
+    # ------------------------------------------------------------------
+
+    def _is_headless_runtime(self) -> bool:
+        """
+        En Render/produccion no hay navegador interactivo real para resolver CAPTCHA.
+        """
+        django_settings = os.getenv("DJANGO_SETTINGS_MODULE", "")
+        return bool(
+            os.getenv("RENDER")
+            or os.getenv("RENDER_EXTERNAL_URL")
+            or django_settings.endswith("production")
+        )
+
+    def _can_open_browser_for_captcha(self) -> bool:
+        return not self._is_headless_runtime()
+
+    def _handle_captcha_unavailable(self, stage: str) -> list[ArticleData]:
+        self.logger.warning(
+            "eLIBRARY: CAPTCHA/bloqueo detectado en %s, pero el entorno es headless "
+            "(Render/produccion). Se omite la fuente temporalmente.",
+            stage,
+        )
+        return []
+
+    # ------------------------------------------------------------------
     # Cookies persistentes
     # ------------------------------------------------------------------
 
     def _load_cookies(self) -> dict:
-        """Intenta cargar cookies en este orden:
+        """
+        Intenta cargar cookies en este orden:
         0. Variable de entorno ELIBRARY_COOKIES_JSON (para Render/Prod)
         1. Chrome/Edge instalado (browser-cookie3) — local
-        2. Archivo en disco _COOKIE_FILE — sesión previa
+        2. Archivo en disco _COOKIE_FILE — sesion previa
         """
-        # 0. Producción: leer desde variable de entorno (inyectada por Render)
-        import os
         env_cookies = os.getenv("ELIBRARY_COOKIES_JSON")
         if env_cookies:
             try:
                 data = json.loads(env_cookies)
-                self.logger.debug("eLIBRARY: %d cookies desde variable de entorno", len(data))
+                self.logger.debug(
+                    "eLIBRARY: %d cookies desde variable de entorno", len(data)
+                )
                 return data
             except Exception as exc:
-                self.logger.warning("eLIBRARY: error parseando ELIBRARY_COOKIES_JSON: %s", exc)
+                self.logger.warning(
+                    "eLIBRARY: error parseando ELIBRARY_COOKIES_JSON: %s", exc
+                )
 
-        # 1. Leer cookies directamente de Chrome/Edge (Local con GUI)
-        if _BROWSERCOOKIE_AVAILABLE:
+        if _BROWSERCOOKIE_AVAILABLE and not self._is_headless_runtime():
             try:
                 jar = browsercookie.chrome(domain_name=".elibrary.ru")
                 chrome_cookies = {c.name: c.value for c in jar}
                 if chrome_cookies:
                     self.logger.debug(
-                        "eLIBRARY: %d cookies leídas de Chrome", len(chrome_cookies)
+                        "eLIBRARY: %d cookies leidas de Chrome", len(chrome_cookies)
                     )
                     return chrome_cookies
             except Exception as exc:
-                self.logger.debug("eLIBRARY: no se pudo leer cookies de Chrome: %s", exc)
+                self.logger.debug(
+                    "eLIBRARY: no se pudo leer cookies de Chrome: %s", exc
+                )
 
-        # 2. Fallback: archivo guardado por el propio conector
         try:
             if _COOKIE_FILE.exists():
                 data = json.loads(_COOKIE_FILE.read_text(encoding="utf-8"))
@@ -129,13 +165,15 @@ class ElibraryConnector(BaseSearchConnector):
                 return data
         except Exception as exc:
             self.logger.warning("eLIBRARY: error leyendo cookies de disco: %s", exc)
+
         return {}
 
     def _save_cookies(self, session) -> None:
         try:
             cookies = dict(session.cookies)
             _COOKIE_FILE.write_text(
-                json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8"
+                json.dumps(cookies, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
             self.logger.debug("eLIBRARY: %d cookies guardadas en disco", len(cookies))
         except Exception as exc:
@@ -154,63 +192,92 @@ class ElibraryConnector(BaseSearchConnector):
     # ------------------------------------------------------------------
 
     def _make_session(self, proxy_url: str, use_cookies: bool = False) -> object:
-        """Crea una sesion curl_cffi, inyectando cookies de Chrome solo si se pide."""
+        """Crea una sesion curl_cffi, inyectando cookies solo si se pide."""
         session = cf_requests.Session(impersonate="chrome120")
+
         if proxy_url:
             session.proxies = {"http": proxy_url, "https": proxy_url}
+
         if use_cookies:
             for name, value in self._load_cookies().items():
-                # Inyectar en ambos dominios para evitar bucles de redireccion
                 session.cookies.set(name, value, domain="www.elibrary.ru")
                 session.cookies.set(name, value, domain="elibrary.ru")
+
         return session
 
     def _do_search(self, query: str, max_results: int) -> list[ArticleData]:
-        headers   = dict(self._BASE_HEADERS)
+        headers = dict(self._BASE_HEADERS)
         proxy_url = getattr(settings, "ELIBRARY_PROXY_URL", "")
-        browser_opened = False  # el navegador se abre como máximo UNA vez
+        browser_opened = False
+        headless = self._is_headless_runtime()
 
-        # Intento 0: sesion limpia (sin cookies) - evita TooManyRedirects
-        # Intentos 1+: con cookies de Chrome/disco - tras detectar CAPTCHA
         for attempt in range(_CAPTCHA_RETRIES + 1):
             use_cookies = attempt > 0
             session = self._make_session(proxy_url, use_cookies=use_cookies)
 
             # PASO 1: GET home
             try:
-                r0 = session.get(_HOME_URL, headers=headers, timeout=20)
+                t0 = time.monotonic()
+                r0 = session.get(_HOME_URL, headers=headers, timeout=_HOME_TIMEOUT)
+                dt = round(time.monotonic() - t0, 2)
+                self.logger.debug(
+                    "eLIBRARY: GET home OK intento=%d cookies=%s proxy=%s duracion=%.2fs status=%s url=%s",
+                    attempt,
+                    use_cookies,
+                    bool(proxy_url),
+                    dt,
+                    getattr(r0, "status_code", "?"),
+                    getattr(r0, "url", "?"),
+                )
             except Exception as exc:
                 self.logger.warning(
-                    "eLIBRARY: error en GET home (intento %d): %s - reintentando sin cookies",
-                    attempt, exc,
+                    "eLIBRARY: error en GET home (intento %d, cookies=%s, proxy=%s): %s",
+                    attempt,
+                    use_cookies,
+                    bool(proxy_url),
+                    exc,
                 )
-                self._clear_cookies()
                 time.sleep(2)
                 continue
 
-            # Comprobar CAPTCHA ya en el GET home
             if _CAPTCHA_MARKER in str(r0.url):
+                if headless:
+                    return self._handle_captcha_unavailable("GET home")
+
                 if attempt >= _CAPTCHA_RETRIES:
                     self.logger.error(
                         "eLIBRARY: CAPTCHA en GET home no resuelto tras %d intentos.",
                         _CAPTCHA_RETRIES,
                     )
                     return []
+
                 if not browser_opened:
                     self.logger.warning(
-                        "eLIBRARY CAPTCHA en GET home — abriendo navegador una sola vez. "
-                        "Resuelve el CAPTCHA y espera %ds...",
+                        "eLIBRARY: CAPTCHA en GET home; abriendo navegador una sola vez. "
+                        "Resuelvelo y espera %ds...",
                         _CAPTCHA_WAIT_SECS,
                     )
-                    webbrowser.open(str(r0.url))
+                    if self._can_open_browser_for_captcha():
+                        webbrowser.open(str(r0.url))
                     browser_opened = True
                     time.sleep(_CAPTCHA_WAIT_SECS)
                 else:
                     self.logger.warning(
-                        "eLIBRARY: CAPTCHA aún activo (intento %d/%d), reintentando en 5s...",
-                        attempt + 1, _CAPTCHA_RETRIES,
+                        "eLIBRARY: CAPTCHA aun activo (intento %d/%d), reintentando en 5s...",
+                        attempt + 1,
+                        _CAPTCHA_RETRIES,
                     )
                     time.sleep(5)
+                continue
+
+            if not r0.text or len(r0.text.strip()) < 100:
+                self.logger.warning(
+                    "eLIBRARY: GET home devolvio HTML vacio o demasiado corto "
+                    "(intento=%d, cookies=%s).",
+                    attempt,
+                    use_cookies,
+                )
+                time.sleep(2)
                 continue
 
             time.sleep(1.0)
@@ -222,7 +289,9 @@ class ElibraryConnector(BaseSearchConnector):
                 for inp in soup0.find_all("input", type="hidden")
                 if inp.get("name")
             }
-            self.logger.debug("eLIBRARY: %d campos ocultos del home", len(hidden_fields))
+            self.logger.debug(
+                "eLIBRARY: %d campos ocultos del home", len(hidden_fields)
+            )
 
             # PASO 2: POST a query_results.asp
             headers_post = {
@@ -231,10 +300,9 @@ class ElibraryConnector(BaseSearchConnector):
                 "Origin": _ELIBRARY_HOST,
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-            # eLibrary requiere campos específicos para que el POST no devuelva 
-            # solo el formulario vacío o "No se encontraron publicaciones".
+
             form_data = {
-                **hidden_fields,    # campos ocultos del home tal como vienen
+                **hidden_fields,
                 "ftext": query,
                 "where_name": "on",
                 "where_abstract": "on",
@@ -256,37 +324,82 @@ class ElibraryConnector(BaseSearchConnector):
                 "changed": "1",
             }
 
-            r1 = session.post(_RESULTS_URL, data=form_data, headers=headers_post, timeout=30)
+            try:
+                t1 = time.monotonic()
+                r1 = session.post(
+                    _RESULTS_URL,
+                    data=form_data,
+                    headers=headers_post,
+                    timeout=_POST_TIMEOUT,
+                )
+                dt1 = round(time.monotonic() - t1, 2)
+                self.logger.debug(
+                    "eLIBRARY: POST results OK intento=%d cookies=%s duracion=%.2fs status=%s url=%s",
+                    attempt,
+                    use_cookies,
+                    dt1,
+                    getattr(r1, "status_code", "?"),
+                    getattr(r1, "url", "?"),
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "eLIBRARY: error en POST results (intento %d, cookies=%s): %s",
+                    attempt,
+                    use_cookies,
+                    exc,
+                )
+                time.sleep(2)
+                continue
 
             if _CAPTCHA_MARKER in str(r1.url):
+                if headless:
+                    return self._handle_captcha_unavailable("POST results")
+
                 if attempt >= _CAPTCHA_RETRIES:
                     self.logger.error(
                         "eLIBRARY: CAPTCHA en POST no resuelto tras %d intentos.",
                         _CAPTCHA_RETRIES,
                     )
                     return []
+
                 if not browser_opened:
                     self.logger.warning(
-                        "eLIBRARY CAPTCHA en POST — abriendo navegador una sola vez. "
-                        "Resuelve el CAPTCHA y espera %ds...",
+                        "eLIBRARY: CAPTCHA en POST; abriendo navegador una sola vez. "
+                        "Resuelvelo y espera %ds...",
                         _CAPTCHA_WAIT_SECS,
                     )
-                    webbrowser.open(str(r1.url))
+                    if self._can_open_browser_for_captcha():
+                        webbrowser.open(str(r1.url))
                     browser_opened = True
                     time.sleep(_CAPTCHA_WAIT_SECS)
                 else:
                     self.logger.warning(
-                        "eLIBRARY: CAPTCHA aún activo en POST (intento %d/%d), reintentando en 5s...",
-                        attempt + 1, _CAPTCHA_RETRIES,
+                        "eLIBRARY: CAPTCHA aun activo en POST (intento %d/%d), reintentando en 5s...",
+                        attempt + 1,
+                        _CAPTCHA_RETRIES,
                     )
                     time.sleep(5)
                 continue
+
+            if not r1.text or len(r1.text.strip()) < 100:
+                self.logger.warning(
+                    "eLIBRARY: POST results devolvio HTML vacio o demasiado corto "
+                    "(intento=%d, cookies=%s).",
+                    attempt,
+                    use_cookies,
+                )
+                time.sleep(2)
+                continue
+
+            self._save_cookies(session)
 
             parsed = urlparse(str(r1.url))
             final_host = f"{parsed.scheme}://{parsed.netloc}"
             return self._parse_results(r1.text, max_results, final_host)
 
-        self.logger.error("eLIBRARY: todos los reintentos de CAPTCHA agotados.")
+        self.logger.error(
+            "eLIBRARY: todos los reintentos agotados (timeout, bloqueo o CAPTCHA no resolvible)."
+        )
         return []
 
     # ------------------------------------------------------------------
@@ -299,7 +412,7 @@ class ElibraryConnector(BaseSearchConnector):
         max_results: int,
         host: str = "https://www.elibrary.ru",
     ) -> list[ArticleData]:
-        soup  = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         table = soup.find("table", id="restab")
         if not table:
             self.logger.warning("eLIBRARY: tabla #restab no encontrada.")
@@ -310,6 +423,7 @@ class ElibraryConnector(BaseSearchConnector):
             title_link = row.find("a", href=re.compile(r"/item\.asp"))
             if not title_link:
                 continue
+
             title = title_link.get_text(strip=True)
             if not title:
                 continue
@@ -322,8 +436,6 @@ class ElibraryConnector(BaseSearchConnector):
             if m:
                 source_id = m.group(1)
 
-            # Autores: la 1a <font color="#00008f"> es el numero de orden (sin <i>);
-            # los autores estan en la primera que SI tiene <i> hijo.
             authors = ""
             for font_tag in row.find_all("font", color="#00008f"):
                 italic = font_tag.find("i")
@@ -341,16 +453,19 @@ class ElibraryConnector(BaseSearchConnector):
             if ym:
                 year = int(ym.group())
 
-            articles.append(ArticleData(
-                title=title,
-                authors=authors,
-                year=year,
-                url=article_url,
-                source_db=self.SOURCE_DB,
-                source_id=source_id,
-                journal=journal,
-                language="ru",
-            ))
+            articles.append(
+                ArticleData(
+                    title=title,
+                    authors=authors,
+                    year=year,
+                    url=article_url,
+                    source_db=self.SOURCE_DB,
+                    source_id=source_id,
+                    journal=journal,
+                    language="ru",
+                )
+            )
+
             if len(articles) >= max_results:
                 break
 
